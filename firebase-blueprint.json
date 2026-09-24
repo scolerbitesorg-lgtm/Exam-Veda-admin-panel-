@@ -1,0 +1,222 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile in the Edu Veda platform",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique identifier of the user" },
+        "name": { "type": "string", "description": "Full name of the user" },
+        "email": { "type": "string", "description": "Email address" },
+        "role": { "type": "string", "enum": ["user", "admin", "instructor"], "description": "Role of the user in the portal" },
+        "mobile": { "type": "string", "description": "Mobile contact number" },
+        "avatar": { "type": "string", "description": "Profile picture URL" },
+        "createdAt": { "type": "string", "description": "Timestamp of account creation" },
+        "updatedAt": { "type": "string", "description": "Timestamp of last profile update" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "Academic subject curriculum item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Subject identifier" },
+        "title": { "type": "string", "description": "Subject title in English" },
+        "titleHindi": { "type": "string", "description": "Subject title in Hindi" },
+        "description": { "type": "string", "description": "Description of the subject" },
+        "color": { "type": "string", "description": "Theme color code" },
+        "icon": { "type": "string", "description": "Icon identifier" },
+        "thumbnail": { "type": "string", "description": "Cover banner image URL" },
+        "order": { "type": "number", "description": "Display sort order" },
+        "isPublished": { "type": "boolean", "description": "Publication status" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "title", "titleHindi"]
+    },
+    "Topic": {
+      "title": "Topic",
+      "description": "Syllabus topic or chapter under a subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Topic identifier" },
+        "subjectId": { "type": "string", "description": "Parent subject reference ID" },
+        "title": { "type": "string", "description": "Topic title in English" },
+        "titleHindi": { "type": "string", "description": "Topic title in Hindi" },
+        "description": { "type": "string", "description": "Detailed chapter outline" },
+        "order": { "type": "number", "description": "Sort sequence" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "subjectId", "title", "titleHindi"]
+    },
+    "Lecture": {
+      "title": "Lecture",
+      "description": "Video lecture video lesson",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Lecture identifier" },
+        "subjectId": { "type": "string", "description": "Parent subject ID" },
+        "topicId": { "type": "string", "description": "Parent topic ID" },
+        "title": { "type": "string", "description": "Lecture title" },
+        "titleHindi": { "type": "string", "description": "Lecture title in Hindi" },
+        "videoUrl": { "type": "string", "description": "Video stream source URL" },
+        "duration": { "type": "string", "description": "Duration string e.g. 45m" },
+        "facultyName": { "type": "string", "description": "Instructor or educator name" },
+        "order": { "type": "number", "description": "Lecture sequence" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "subjectId", "topicId", "title", "videoUrl"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "Study material note or downloadable PDF",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Note identifier" },
+        "subjectId": { "type": "string", "description": "Parent subject ID" },
+        "topicId": { "type": "string", "description": "Parent topic ID" },
+        "title": { "type": "string", "description": "Note title" },
+        "titleHindi": { "type": "string", "description": "Note title in Hindi" },
+        "content": { "type": "string", "description": "Rich text note body content" },
+        "pdfUrl": { "type": "string", "description": "Downloadable PDF document link" },
+        "order": { "type": "number", "description": "Sequence" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "subjectId", "topicId", "title"]
+    },
+    "MCQ": {
+      "title": "MCQ",
+      "description": "Multiple choice practice question",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "MCQ identifier" },
+        "subjectId": { "type": "string", "description": "Parent subject ID" },
+        "topicId": { "type": "string", "description": "Parent topic ID" },
+        "question": { "type": "string", "description": "Question in English" },
+        "questionHindi": { "type": "string", "description": "Question in Hindi" },
+        "options": { "type": "array", "description": "List of answer choices" },
+        "optionsHindi": { "type": "array", "description": "List of Hindi answer choices" },
+        "correctOption": { "type": "number", "description": "Zero-indexed correct option" },
+        "explanation": { "type": "string", "description": "Detailed explanation" },
+        "explanationHindi": { "type": "string", "description": "Hindi explanation" },
+        "difficulty": { "type": "string", "enum": ["easy", "medium", "hard"], "description": "Difficulty level" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "subjectId", "topicId", "question", "options", "correctOption"]
+    },
+    "MockTest": {
+      "title": "MockTest",
+      "description": "Timed mock test exam series",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mock test identifier" },
+        "title": { "type": "string", "description": "Title in English" },
+        "titleHindi": { "type": "string", "description": "Title in Hindi" },
+        "subjectId": { "type": "string", "description": "Target subject ID or all" },
+        "durationMinutes": { "type": "number", "description": "Total exam duration in minutes" },
+        "totalMarks": { "type": "number", "description": "Maximum marks" },
+        "passingPercentage": { "type": "number", "description": "Passing grade percentage" },
+        "questionIds": { "type": "array", "description": "List of associated MCQ IDs" },
+        "isPublished": { "type": "boolean", "description": "Live status" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "title", "durationMinutes", "totalMarks", "questionIds"]
+    },
+    "MockAttempt": {
+      "title": "MockAttempt",
+      "description": "Student attempt record on a mock test",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Attempt identifier" },
+        "mockTestId": { "type": "string", "description": "Mock test reference ID" },
+        "mockTestTitle": { "type": "string", "description": "Title of the mock test" },
+        "userId": { "type": "string", "description": "User identifier" },
+        "userName": { "type": "string", "description": "User name" },
+        "score": { "type": "number", "description": "Score attained" },
+        "totalQuestions": { "type": "number", "description": "Total questions count" },
+        "correctCount": { "type": "number", "description": "Correct answers count" },
+        "incorrectCount": { "type": "number", "description": "Wrong answers count" },
+        "timeTakenSeconds": { "type": "number", "description": "Duration spent in seconds" },
+        "createdAt": { "type": "string", "description": "Submission timestamp" }
+      },
+      "required": ["id", "mockTestId", "userId", "score", "totalQuestions"]
+    },
+    "MCQAttempt": {
+      "title": "MCQAttempt",
+      "description": "Student single or batch practice attempt on MCQs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Attempt record ID" },
+        "userId": { "type": "string", "description": "User identifier" },
+        "userName": { "type": "string", "description": "User name" },
+        "topicId": { "type": "string", "description": "Topic reference ID" },
+        "subjectId": { "type": "string", "description": "Subject reference ID" },
+        "score": { "type": "number", "description": "Correct score" },
+        "totalQuestions": { "type": "number", "description": "Total questions" },
+        "createdAt": { "type": "string", "description": "Submission timestamp" }
+      },
+      "required": ["id", "userId", "score", "totalQuestions"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global application configuration and brand settings",
+      "type": "object",
+      "properties": {
+        "appName": { "type": "string", "description": "Application display brand name" },
+        "tagline": { "type": "string", "description": "Brand slogan or motto" },
+        "logo": { "type": "string", "description": "Logo URL" },
+        "supportEmail": { "type": "string", "description": "Support contact email" },
+        "supportPhone": { "type": "string", "description": "Support hotline phone" },
+        "themeColor": { "type": "string", "description": "Primary brand color" },
+        "maintenanceMode": { "type": "boolean", "description": "Platform maintenance toggle" },
+        "maintenanceMessage": { "type": "string", "description": "Maintenance notice message" },
+        "version": { "type": "string", "description": "Build version" },
+        "bannerNotice": { "type": "string", "description": "Top promotional notice" },
+        "showBanner": { "type": "boolean", "description": "Show top announcement banner" }
+      },
+      "required": ["appName", "supportEmail"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles and account settings"
+    },
+    "/subjects/{subjectId}": {
+      "schema": "Subject",
+      "description": "Curriculum subjects catalog"
+    },
+    "/topics/{topicId}": {
+      "schema": "Topic",
+      "description": "Subject chapters and topics"
+    },
+    "/lectures/{lectureId}": {
+      "schema": "Lecture",
+      "description": "Video lectures repository"
+    },
+    "/notes/{noteId}": {
+      "schema": "Note",
+      "description": "Study notes and PDF documents"
+    },
+    "/mcqs/{mcqId}": {
+      "schema": "MCQ",
+      "description": "Objective question bank"
+    },
+    "/mockTests/{mockId}": {
+      "schema": "MockTest",
+      "description": "Mock test series exams"
+    },
+    "/mockAttempts/{attemptId}": {
+      "schema": "MockAttempt",
+      "description": "Student mock test results"
+    },
+    "/mcqAttempts/{attemptId}": {
+      "schema": "MCQAttempt",
+      "description": "Student MCQ practice results"
+    },
+    "/appSettings/{docId}": {
+      "schema": "AppSettings",
+      "description": "Global application configuration"
+    }
+  }
+}

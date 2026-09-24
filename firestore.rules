@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Edu Veda Master Unified Database Rules
+    // Allows seamless live read and write synchronization between Admin Panel and Student Apps
+
+    match /appSettings/{docId} {
+      allow read, write: if true;
+    }
+
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    match /subjects/{subjectId} {
+      allow read, write: if true;
+    }
+
+    match /topics/{topicId} {
+      allow read, write: if true;
+    }
+
+    match /lectures/{lectureId} {
+      allow read, write: if true;
+    }
+
+    match /notes/{noteId} {
+      allow read, write: if true;
+    }
+
+    match /mcqs/{mcqId} {
+      allow read, write: if true;
+    }
+
+    match /mockTests/{mockId} {
+      allow read, write: if true;
+    }
+
+    match /mockAttempts/{attemptId} {
+      allow read, write: if true;
+    }
+
+    match /mcqAttempts/{attemptId} {
+      allow read, write: if true;
+    }
+
+    match /progress/{progressId} {
+      allow read, write: if true;
+    }
+  }
+}

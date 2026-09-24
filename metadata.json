@@ -1,0 +1,8 @@
+{
+  "name": "Edu Veda - Admin Portal & Content Management",
+  "description": "Professional Admin Panel and Content Management System for Edu Veda.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
