@@ -11,9 +11,12 @@ import {
   HelpCircle,
   Layers,
   ArrowRight,
+  Award,
+  Calendar,
 } from 'lucide-react';
 import type { Subject, Topic } from '../../types';
-import { addMCQ } from '../../services/dbService';
+import { addMCQsBatch } from '../../services/dbService';
+import { detectExamMetadata } from '../../utils/examTagDetector';
 
 interface BulkImportMCQModalProps {
   isOpen: boolean;
@@ -31,17 +34,36 @@ interface ParsedMCQItem {
   correctOption: number; // 0, 1, 2, 3
   explanation?: string;
   difficulty: 'easy' | 'medium' | 'hard';
+  examTag?: string;
+  examDate?: string;
+  exam?: string;
+  shift?: string;
+  year?: number | string;
   isValid: boolean;
   errorMessage?: string;
 }
 
-const SAMPLE_CSV_TEMPLATE = `question,hindiQuestion,optionA,optionB,optionC,optionD,correctAnswer,difficulty,explanation
-"Which Indian Emperor issued the Rock Edicts?","किस भारतीय सम्राट ने शिलालेख जारी किए?","Chandragupta Maurya","Ashoka The Great","Samudragupta","Harshavardhana","2","medium","Emperor Ashoka issued major and minor rock edicts across the Indian subcontinent."
-"The Right to Constitutional Remedies is under which Article?","संवैधानिक उपचारों का अधिकार किस अनुच्छेद के तहत है?","Article 21","Article 19","Article 32","Article 14","3","easy","Article 32 was called the heart and soul of the Constitution by Dr. B.R. Ambedkar."
-"Which river is known as the Sorrow of Bengal?","किस नदी को बंगाल का शोक कहा जाता है?","Damodar River","Hooghly River","Kosi River","Mahanadi River","1","easy","Damodar River was historically known as Sorrow of Bengal due to devastating floods."`;
+const SAMPLE_CSV_TEMPLATE = `question,hindiQuestion,optionA,optionB,optionC,optionD,correctAnswer,difficulty,explanation,examTag,examDate
+"Which Indian Emperor issued the Rock Edicts? [SSC CGL 2018]","किस भारतीय सम्राट ने शिलालेख जारी किए?","Chandragupta Maurya","Ashoka The Great","Samudragupta","Harshavardhana","2","medium","Emperor Ashoka issued major and minor rock edicts across the Indian subcontinent.","SSC CGL Mains 2018","15-10-2018"
+"The Right to Constitutional Remedies is under which Article? (UPSC Prelims 2021)","संवैधानिक उपचारों का अधिकार किस अनुच्छेद के तहत है?","Article 21","Article 19","Article 32","Article 14","3","easy","Article 32 was called the heart and soul of the Constitution by Dr. B.R. Ambedkar.","UPSC Prelims 2021","2021"
+"Which river is known as the Sorrow of Bengal?","किस नदी को बंगाल का शोक कहा जाता है?","Damodar River","Hooghly River","Kosi River","Mahanadi River","1","easy","Damodar River was historically known as Sorrow of Bengal due to devastating floods.","",""`;
 
-const SAMPLE_PIPE_TEMPLATE = `Which planet is closest to the Sun? | सूर्य के सबसे निकट कौन सा ग्रह है? | Venus | Mercury | Mars | Earth | 2 | easy | Mercury is the smallest and innermost planet in the Solar System.
-What is the SI unit of electric current? | विद्युत धारा का SI मात्रक क्या है? | Volt | Ohm | Ampere | Watt | 3 | easy | Ampere (A) is the base SI unit of electric current.`;
+const SAMPLE_PIPE_TEMPLATE = `Which planet is closest to the Sun? [CHSL 2023] | सूर्य के सबसे निकट कौन सा ग्रह है? | Venus | Mercury | Mars | Earth | 2 | easy | Mercury is the smallest planet.
+What is the SI unit of electric current? | विद्युत धारा का SI मात्रक क्या है? | Volt | Ohm | Ampere | Watt | 3 | easy | Ampere (A) is the base unit.`;
+
+const SAMPLE_JSON_TEMPLATE = `[
+  {
+    "question": "Which article of the Indian Constitution deals with Fundamental Rights?",
+    "options": ["Article 12-35", "Article 36-51", "Article 51A", "Article 1-4"],
+    "correctAnswer": 0,
+    "explanation": "Part III of the Constitution covers Articles 12 to 35 dealing with Fundamental Rights.",
+    "difficulty": "medium",
+    "examTag": "SSC CGL Mains 2018",
+    "exam": "SSC CGL",
+    "shift": "Mains",
+    "year": 2018
+  }
+]`;
 
 export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
   isOpen,
@@ -61,16 +83,87 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
     defaultTopicId || availableTopics[0]?.id || ''
   );
 
+  const [batchExamDate, setBatchExamDate] = useState('');
+  const [batchExamTag, setBatchExamTag] = useState('');
   const [rawText, setRawText] = useState('');
   const [copiedTemplate, setCopiedTemplate] = useState(false);
   const [parsedItems, setParsedItems] = useState<ParsedMCQItem[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
 
-  // Parse CSV / Pipe separated text
-  const parseInput = (text: string): ParsedMCQItem[] => {
-    if (!text.trim()) return [];
-    const lines = text
+  // Parse CSV / Pipe / JSON separated text
+  const parseInput = (text: string, bDate = '', bTag = ''): ParsedMCQItem[] => {
+    const trimmed = text.trim();
+    if (!trimmed) return [];
+
+    const defaultDate = bDate.trim() || undefined;
+    const defaultTag = bTag.trim() || undefined;
+
+    // 1. JSON Array format detection
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        const parsedJson = JSON.parse(trimmed.startsWith('{') ? `[${trimmed}]` : trimmed);
+        if (Array.isArray(parsedJson)) {
+          return parsedJson.map((item: any, idx: number) => {
+            const rawQ = item.question || item.questionText || item.title || '';
+            const detectedMeta = detectExamMetadata(rawQ);
+            const question = detectedMeta.cleanQuestion || rawQ;
+
+            let opts: [string, string, string, string] = ['', '', '', ''];
+            if (Array.isArray(item.options)) {
+              opts = [
+                String(item.options[0] || ''),
+                String(item.options[1] || ''),
+                String(item.options[2] || ''),
+                String(item.options[3] || ''),
+              ];
+            } else if (item.optionA || item.a) {
+              opts = [
+                String(item.optionA || item.a || item.optA || ''),
+                String(item.optionB || item.b || item.optB || ''),
+                String(item.optionC || item.c || item.optC || ''),
+                String(item.optionD || item.d || item.optD || ''),
+              ];
+            }
+
+            let correctIdx = 0;
+            const rawAns = item.correctAnswer ?? item.correctOption ?? item.ans ?? item.answer;
+            if (typeof rawAns === 'number') {
+              correctIdx = rawAns >= 1 && rawAns <= 4 && !item.zeroIndexed ? rawAns - 1 : rawAns;
+            } else if (typeof rawAns === 'string') {
+              const u = rawAns.trim().toUpperCase();
+              if (u === 'A' || u === '0' || u === '1') correctIdx = u === '1' && item.options ? 0 : (u === 'A' ? 0 : parseInt(u, 10));
+              else if (u === 'B' || u === '2') correctIdx = 1;
+              else if (u === 'C' || u === '3') correctIdx = 2;
+              else if (u === 'D' || u === '4') correctIdx = 3;
+            }
+
+            const isValid = Boolean(question.trim() && opts[0].trim() && opts[1].trim());
+
+            return {
+              question,
+              hindiQuestion: item.hindiQuestion || item.hindi || '',
+              options: opts,
+              correctOption: correctIdx >= 0 && correctIdx <= 3 ? correctIdx : 0,
+              explanation: item.explanation || item.exp || '',
+              difficulty: (item.difficulty === 'easy' || item.difficulty === 'hard') ? item.difficulty : 'medium',
+              examTag: item.examTag || item.tag || detectedMeta.examTag || defaultTag,
+              examDate: item.examDate || item.date || detectedMeta.examDate || defaultDate,
+              exam: item.exam || detectedMeta.exam,
+              shift: item.shift || detectedMeta.shift,
+              year: item.year || detectedMeta.year,
+              isValid,
+              errorMessage: isValid ? undefined : `Item #${idx + 1} is missing question or options.`,
+            };
+          });
+        }
+      } catch {
+        // Fall back to line by line parser
+      }
+    }
+
+    // 2. Line by line CSV / Pipe parser
+    const lines = trimmed
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
@@ -88,7 +181,6 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
 
     for (let i = startIdx; i < lines.length; i++) {
       const line = lines[i];
-
       let parts: string[] = [];
 
       // Pipe separated support
@@ -124,12 +216,6 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
         continue;
       }
 
-      // Column mappings:
-      // If 9 columns: [question, hindiQuestion, optA, optB, optC, optD, correctAns, difficulty, explanation]
-      // If 8 columns: [question, hindiQuestion, optA, optB, optC, optD, correctAns, explanation]
-      // If 7 columns: [question, optA, optB, optC, optD, correctAns, explanation]
-      // If 6 columns: [question, optA, optB, optC, optD, correctAns]
-
       let q = '';
       let qHindi = '';
       let optA = '';
@@ -139,8 +225,39 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
       let rawCorrect = '';
       let diff: 'easy' | 'medium' | 'hard' = 'medium';
       let exp = '';
+      let explicitExamTag = '';
+      let explicitExamDate = '';
 
-      if (parts.length >= 9) {
+      if (parts.length >= 11) {
+        q = parts[0];
+        qHindi = parts[1];
+        optA = parts[2];
+        optB = parts[3];
+        optC = parts[4];
+        optD = parts[5];
+        rawCorrect = parts[6];
+        const rawDiff = (parts[7] || '').toLowerCase();
+        if (rawDiff.includes('easy')) diff = 'easy';
+        else if (rawDiff.includes('hard')) diff = 'hard';
+        else diff = 'medium';
+        exp = parts[8] || '';
+        explicitExamTag = parts[9] || '';
+        explicitExamDate = parts[10] || '';
+      } else if (parts.length >= 10) {
+        q = parts[0];
+        qHindi = parts[1];
+        optA = parts[2];
+        optB = parts[3];
+        optC = parts[4];
+        optD = parts[5];
+        rawCorrect = parts[6];
+        const rawDiff = (parts[7] || '').toLowerCase();
+        if (rawDiff.includes('easy')) diff = 'easy';
+        else if (rawDiff.includes('hard')) diff = 'hard';
+        else diff = 'medium';
+        exp = parts[8] || '';
+        explicitExamTag = parts[9] || '';
+      } else if (parts.length >= 9) {
         q = parts[0];
         qHindi = parts[1];
         optA = parts[2];
@@ -179,6 +296,12 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
         rawCorrect = parts[5];
       }
 
+      // Auto-Detect exam metadata from question (e.g. "[CGL mains 2018]" or "(chsl 2023)")
+      const detectedMeta = detectExamMetadata(q);
+      const cleanQ = detectedMeta.cleanQuestion;
+      const finalExamTag = explicitExamTag || detectedMeta.examTag || defaultTag;
+      const finalExamDate = explicitExamDate || detectedMeta.examDate || defaultDate;
+
       // Determine correct option (1-4, 0-3, A-D)
       let correctIdx = 0;
       const cleanCorrect = rawCorrect.trim().toUpperCase();
@@ -195,15 +318,20 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
         }
       }
 
-      const isValid = Boolean(q.trim() && optA.trim() && optB.trim() && optC.trim() && optD.trim());
+      const isValid = Boolean(cleanQ.trim() && optA.trim() && optB.trim() && optC.trim() && optD.trim());
 
       results.push({
-        question: q,
+        question: cleanQ,
         hindiQuestion: qHindi,
         options: [optA, optB, optC, optD],
         correctOption: correctIdx,
         explanation: exp,
         difficulty: diff,
+        examTag: finalExamTag,
+        examDate: finalExamDate,
+        exam: detectedMeta.exam,
+        shift: detectedMeta.shift,
+        year: detectedMeta.year,
         isValid,
         errorMessage: isValid ? undefined : 'Missing question or one of 4 options.',
       });
@@ -212,11 +340,14 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
     return results;
   };
 
-  // Re-parse whenever rawText changes
+  // Re-parse whenever rawText or batch metadata changes (debounced to avoid UI freeze)
   React.useEffect(() => {
-    const parsed = parseInput(rawText);
-    setParsedItems(parsed);
-  }, [rawText]);
+    const timer = setTimeout(() => {
+      const parsed = parseInput(rawText, batchExamDate, batchExamTag);
+      setParsedItems(parsed);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [rawText, batchExamDate, batchExamTag]);
 
   const handleCopyTemplate = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -248,25 +379,29 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
     setImportProgress({ current: 0, total: validItems.length });
 
     try {
-      for (let i = 0; i < validItems.length; i++) {
-        const item = validItems[i];
-        await addMCQ({
-          subjectId: selectedSubjectId,
-          topicId: selectedTopicId,
-          question: item.question,
-          hindiQuestion: item.hindiQuestion || '',
-          options: item.options,
-          correctAnswer: item.correctOption,
-          difficulty: item.difficulty,
-          explanation: item.explanation || '',
-          published: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-        setImportProgress({ current: i + 1, total: validItems.length });
-      }
+      const mcqsToUpload = validItems.map((item, idx) => ({
+        subjectId: selectedSubjectId,
+        topicId: selectedTopicId,
+        question: item.question,
+        hindiQuestion: item.hindiQuestion || '',
+        options: item.options,
+        correctAnswer: item.correctOption,
+        difficulty: item.difficulty,
+        explanation: item.explanation || '',
+        examTag: item.examTag || batchExamTag.trim() || undefined,
+        examDate: item.examDate || batchExamDate.trim() || undefined,
+        exam: item.exam || undefined,
+        shift: item.shift || undefined,
+        year: item.year || undefined,
+        published: true,
+        order: idx + 1,
+      }));
 
-      alert(`🎉 Successfully imported ${validItems.length} MCQs into the Question Bank!`);
+      setImportProgress({ current: Math.floor(validItems.length / 2), total: validItems.length });
+      await addMCQsBatch(mcqsToUpload);
+      setImportProgress({ current: validItems.length, total: validItems.length });
+
+      alert(`🎉 Successfully imported ${validItems.length} MCQs smoothly into the Question Bank!`);
       onClose();
     } catch (err: any) {
       alert('Error importing questions: ' + err.message);
@@ -307,7 +442,7 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-4 space-y-5 text-xs">
+        <div className="flex-1 overflow-y-auto py-4 space-y-4 text-xs">
           {/* Target Subject & Topic Selection */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-200">
             <div>
@@ -355,6 +490,53 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
             </div>
           </div>
 
+          {/* Dedicated Batch Exam Date & Tagging Field */}
+          <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Award className="w-4 h-4 text-amber-600" />
+                <span className="font-extrabold text-amber-950 text-xs">
+                  Batch Exam Date & Metadata Tag (संपूर्ण बैच हेतु परीक्षा दिनांक व नाम)
+                </span>
+              </div>
+              <span className="text-[10px] text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-md font-semibold">
+                Optional for entire batch
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-snug">
+              यदि आप एक ही परीक्षा के कई प्रश्न अपलोड कर रहे हैं, तो नीचे <strong>Exam Date</strong> और <strong>Exam Tag</strong> दर्ज करें। यह सभी प्रश्नों में स्वचालित रूप से जुड़ जाएगा।
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 text-[11px] flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Batch Exam Date / Year (परीक्षा दिनांक या वर्ष)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="उदा. 15-10-2018 / 2023 / 15 March 2023"
+                  value={batchExamDate}
+                  onChange={(e) => setBatchExamDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 font-semibold text-xs focus:border-amber-500 focus:ring-1 focus:ring-amber-200"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1 text-[11px] flex items-center gap-1">
+                  <Award className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Batch Exam Name / Shift (परीक्षा नाम व शिफ्ट)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="उदा. SSC CGL Mains 2018 / UPSC Prelims 2021"
+                  value={batchExamTag}
+                  onChange={(e) => setBatchExamTag(e.target.value)}
+                  className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 font-semibold text-xs focus:border-amber-500 focus:ring-1 focus:ring-amber-200"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Quick Template Actions */}
           <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 text-indigo-900">
             <div className="flex items-center gap-2">
@@ -391,7 +573,15 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
               <label className="font-bold text-slate-800">
                 Paste CSV or Structured Text Input:
               </label>
-              <div className="flex items-center gap-2 text-[11px]">
+              <div className="flex items-center gap-2 text-[11px] flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setRawText(SAMPLE_JSON_TEMPLATE)}
+                  className="text-indigo-600 hover:underline font-bold"
+                >
+                  Load Sample JSON
+                </button>
+                <span className="text-slate-300">•</span>
                 <button
                   type="button"
                   onClick={() => setRawText(SAMPLE_CSV_TEMPLATE)}
@@ -465,13 +655,19 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="space-y-1 min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-extrabold text-slate-400 text-[10px] font-mono">
                             #{idx + 1}
                           </span>
                           <span className="font-bold text-slate-900 text-xs truncate">
                             {item.question}
                           </span>
+                          {(item.examTag || item.examDate) && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                              <Award className="w-2.5 h-2.5 text-amber-600" />
+                              {item.examTag || item.examDate}
+                            </span>
+                          )}
                         </div>
                         {item.hindiQuestion && (
                           <div className="text-[11px] text-indigo-600 font-medium truncate">

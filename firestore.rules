@@ -44,6 +44,14 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /activityHistory/{historyId} {
+      allow read, write: if true;
+    }
+
+    match /loginHistory/{loginId} {
+      allow read, write: if true;
+    }
+
     match /progress/{progressId} {
       allow read, write: if true;
     }

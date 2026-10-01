@@ -578,6 +578,32 @@ export const StudentAppPreviewModal: React.FC<StudentAppPreviewModalProps> = ({
                         </div>
                       )}
                     </div>
+
+                    {/* Support & Helpline Info Card (Reflects App Settings in real-time) */}
+                    <div className="p-3.5 rounded-2xl bg-white border border-slate-200/90 shadow-2xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                          Official Help & Support (सहायता केंद्र)
+                        </span>
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                          v{appSettings?.version || '2.4.0'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-1.5">
+                          <span className="text-indigo-600 font-bold">📧</span>
+                          <span className="font-semibold text-slate-700 truncate font-mono text-[10px]">
+                            {appSettings?.supportEmail || 'support@eduveda.in'}
+                          </span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-1.5">
+                          <span className="text-emerald-600 font-bold">📞</span>
+                          <span className="font-semibold text-slate-700 truncate font-mono text-[10px]">
+                            {appSettings?.supportPhone || '+91 98765 43210'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -883,6 +909,12 @@ export const StudentAppPreviewModal: React.FC<StudentAppPreviewModalProps> = ({
                               borderColor: '#e2e8f0',
                             }}
                           >
+                            {(currentMCQ.examTag || currentMCQ.examDate || currentMCQ.exam) && (
+                              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-900 border border-amber-200 text-[10px] font-extrabold mb-1">
+                                <Award className="w-3 h-3 text-amber-600" />
+                                <span>{currentMCQ.examTag || `${currentMCQ.exam || ''} ${currentMCQ.examDate || ''}`.trim()}</span>
+                              </div>
+                            )}
                             <h3
                               className="font-extrabold text-xs leading-snug"
                               style={{ color: mcqTheme.textColor }}

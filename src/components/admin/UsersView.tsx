@@ -86,14 +86,23 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
   // Temporary access controls inside Appoint Modal
   const [appointIsTemporary, setAppointIsTemporary] = useState(false);
-  const [appointDurationVal, setAppointDurationVal] = useState<number>(1);
-  const [appointDurationUnit, setAppointDurationUnit] = useState<'minutes' | 'hours' | 'days'>('hours');
+  const [appointDurationVal, setAppointDurationVal] = useState<string>('24');
+  const [appointDurationUnit, setAppointDurationUnit] = useState<'minutes' | 'hours' | 'days' | 'months'>('hours');
   const [appointCustomDatetime, setAppointCustomDatetime] = useState<string>('');
+
+  // Universal Manage Access & Expiry Modal (Convert Permanent <-> Temporary for ANY user)
+  const [manageAccessUser, setManageAccessUser] = useState<UserProfile | null>(null);
+  const [manageRole, setManageRole] = useState<'developer' | 'content_admin' | 'admin' | 'instructor' | 'user'>('content_admin');
+  const [manageIsTemporary, setManageIsTemporary] = useState<boolean>(false);
+  const [manageDurationVal, setManageDurationVal] = useState<string>('24');
+  const [manageDurationUnit, setManageDurationUnit] = useState<'minutes' | 'hours' | 'days' | 'months' | 'years'>('hours');
+  const [manageCustomDatetime, setManageCustomDatetime] = useState<string>('');
+  const [manageSubmitting, setManageSubmitting] = useState<boolean>(false);
 
   // Quick Extend Access Modal
   const [extendModalUser, setExtendModalUser] = useState<UserProfile | null>(null);
-  const [extendVal, setExtendVal] = useState<number>(1);
-  const [extendUnit, setExtendUnit] = useState<'minutes' | 'hours' | 'days'>('hours');
+  const [extendVal, setExtendVal] = useState<string>('1');
+  const [extendUnit, setExtendUnit] = useState<'minutes' | 'hours' | 'days' | 'months'>('hours');
   const [extendSubmitting, setExtendSubmitting] = useState(false);
 
   // Edit password modal state
@@ -107,8 +116,8 @@ export const UsersView: React.FC<UsersViewProps> = ({
   const [elevateUser, setElevateUser] = useState<UserProfile | null>(null);
   const [elevateRole, setElevateRole] = useState<'developer' | 'content_admin'>('content_admin');
   const [elevateIsTemp, setElevateIsTemp] = useState(true);
-  const [elevateDurationVal, setElevateDurationVal] = useState<number>(1);
-  const [elevateDurationUnit, setElevateDurationUnit] = useState<'minutes' | 'hours' | 'days'>('hours');
+  const [elevateDurationVal, setElevateDurationVal] = useState<string>('24');
+  const [elevateDurationUnit, setElevateDurationUnit] = useState<'minutes' | 'hours' | 'days' | 'months'>('hours');
   const [elevateSubmitting, setElevateSubmitting] = useState(false);
 
   // Filter team members vs Regular Students
@@ -182,6 +191,78 @@ export const UsersView: React.FC<UsersViewProps> = ({
     setTimeout(() => setCopiedUid(null), 2500);
   };
 
+  const openManageAccessModal = (user: UserProfile) => {
+    setManageAccessUser(user);
+    const validRole: 'developer' | 'content_admin' | 'admin' | 'instructor' | 'user' =
+      user.role === 'developer'
+        ? 'developer'
+        : user.role === 'instructor'
+        ? 'instructor'
+        : user.role === 'user'
+        ? 'user'
+        : 'content_admin';
+    setManageRole(validRole);
+    setManageIsTemporary(user.isTemporary ?? false);
+    if (user.roleExpiresAt) {
+      setManageCustomDatetime(toLocalDatetimeInputValue(user.roleExpiresAt));
+    } else {
+      setManageCustomDatetime('');
+      setManageDurationVal('24');
+      setManageDurationUnit('hours');
+    }
+  };
+
+  const handleSaveManageAccess = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manageAccessUser || !isDeveloper) return;
+    setManageSubmitting(true);
+    try {
+      let roleExpiresAt: string | null = null;
+      let durationMinutes: number | undefined = undefined;
+
+      if (manageIsTemporary) {
+        if (manageCustomDatetime) {
+          roleExpiresAt = fromLocalDatetimeInputValue(manageCustomDatetime);
+          const diffMs = new Date(roleExpiresAt).getTime() - Date.now();
+          durationMinutes = Math.max(1, Math.round(diffMs / 60000));
+        } else {
+          const numVal = Math.max(1, parseInt(manageDurationVal) || 1);
+          roleExpiresAt = calculateExpiryTimestamp(numVal, manageDurationUnit);
+          durationMinutes =
+            manageDurationUnit === 'minutes'
+              ? numVal
+              : manageDurationUnit === 'hours'
+              ? numVal * 60
+              : manageDurationUnit === 'days'
+              ? numVal * 1440
+              : manageDurationUnit === 'months'
+              ? numVal * 43200
+              : numVal * 525600;
+        }
+      }
+
+      await updateUserRoleWithExpiry(
+        manageAccessUser.uid,
+        manageRole,
+        manageIsTemporary,
+        roleExpiresAt,
+        durationMinutes
+      );
+
+      toast.success(
+        manageIsTemporary
+          ? `Access for ${manageAccessUser.name || manageAccessUser.email} set to Temporary (expires on ${formatReadableDate(roleExpiresAt || undefined)}).`
+          : `Access for ${manageAccessUser.name || manageAccessUser.email} converted to Permanent!`,
+        'Access Updated'
+      );
+      setManageAccessUser(null);
+    } catch (err: any) {
+      toast.error('Failed to update access: ' + err.message, 'Update Failed');
+    } finally {
+      setManageSubmitting(false);
+    }
+  };
+
   const handleAppointSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isDeveloper) {
@@ -199,13 +280,18 @@ export const UsersView: React.FC<UsersViewProps> = ({
           const diffMs = new Date(roleExpiresAt).getTime() - Date.now();
           durationMinutes = Math.max(1, Math.round(diffMs / 60000));
         } else {
-          roleExpiresAt = calculateExpiryTimestamp(appointDurationVal, appointDurationUnit);
+          const numVal = Math.max(1, parseInt(appointDurationVal) || 1);
+          roleExpiresAt = calculateExpiryTimestamp(numVal, appointDurationUnit);
           durationMinutes =
             appointDurationUnit === 'minutes'
-              ? appointDurationVal
+              ? numVal
               : appointDurationUnit === 'hours'
-              ? appointDurationVal * 60
-              : appointDurationVal * 1440;
+              ? numVal * 60
+              : appointDurationUnit === 'days'
+              ? numVal * 1440
+              : appointDurationUnit === 'months'
+              ? numVal * 43200
+              : numVal * 525600;
         }
       }
 
@@ -234,6 +320,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
         setAppointPassword('');
         setAppointMobile('');
         setAppointIsTemporary(false);
+        setAppointDurationVal('24');
         setAppointCustomDatetime('');
       }, 1500);
     } catch (err: any) {
@@ -248,10 +335,11 @@ export const UsersView: React.FC<UsersViewProps> = ({
     if (!extendModalUser || !isDeveloper) return;
     setExtendSubmitting(true);
     try {
-      const newExpiry = calculateExpiryTimestamp(extendVal, extendUnit);
+      const numVal = Math.max(1, parseInt(extendVal) || 1);
+      const newExpiry = calculateExpiryTimestamp(numVal, extendUnit);
       await updateUserRoleWithExpiry(extendModalUser.uid, extendModalUser.role, true, newExpiry);
       toast.success(
-        `Access for ${extendModalUser.name || extendModalUser.email} extended by ${extendVal} ${extendUnit}!`,
+        `Access for ${extendModalUser.name || extendModalUser.email} extended by ${numVal} ${extendUnit}!`,
         'Access Extended'
       );
       setExtendModalUser(null);
@@ -308,10 +396,20 @@ export const UsersView: React.FC<UsersViewProps> = ({
     setElevateSubmitting(true);
     try {
       let roleExpiresAt: string | null = null;
+      let durationMinutes: number | undefined = undefined;
       if (elevateIsTemp) {
-        roleExpiresAt = calculateExpiryTimestamp(elevateDurationVal, elevateDurationUnit);
+        const numVal = Math.max(1, parseInt(elevateDurationVal) || 1);
+        roleExpiresAt = calculateExpiryTimestamp(numVal, elevateDurationUnit);
+        durationMinutes =
+          elevateDurationUnit === 'minutes'
+            ? numVal
+            : elevateDurationUnit === 'hours'
+            ? numVal * 60
+            : elevateDurationUnit === 'days'
+            ? numVal * 1440
+            : numVal * 43200;
       }
-      await updateUserRoleWithExpiry(elevateUser.uid, elevateRole, elevateIsTemp, roleExpiresAt);
+      await updateUserRoleWithExpiry(elevateUser.uid, elevateRole, elevateIsTemp, roleExpiresAt, durationMinutes);
       toast.success(
         `${elevateUser.name || elevateUser.email} has been elevated to ${
           elevateIsTemp ? 'Temporary ' : ''
@@ -683,7 +781,28 @@ export const UsersView: React.FC<UsersViewProps> = ({
                             <span>Copy</span>
                           </button>
 
-                          {/* Temporary Account Specific Actions */}
+                          {/* Universal Manage Access & Expiry (Convert Permanent <-> Temporary) */}
+                          {isDeveloper && (
+                            <button
+                              type="button"
+                              onClick={() => openManageAccessModal(u)}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer flex items-center gap-1 shadow-2xs ${
+                                u.isTemporary
+                                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+                              }`}
+                              title={
+                                u.isTemporary
+                                  ? 'Edit temporary duration or convert to permanent'
+                                  : 'Convert permanent user to temporary with custom expiry'
+                              }
+                            >
+                              <Timer className="w-3 h-3" />
+                              <span>{u.isTemporary ? 'Edit Expiry' : 'Make Temp ⏳'}</span>
+                            </button>
+                          )}
+
+                          {/* Temporary Account Quick Actions */}
                           {u.isTemporary && (
                             <>
                               {/* Extend Access Button */}
@@ -1085,13 +1204,15 @@ export const UsersView: React.FC<UsersViewProps> = ({
                     {/* Presets */}
                     <div className="flex flex-wrap gap-1.5">
                       {[
-                        { label: '30 Mins', val: 30, unit: 'minutes' as const },
-                        { label: '1 Hour', val: 1, unit: 'hours' as const },
-                        { label: '6 Hours', val: 6, unit: 'hours' as const },
-                        { label: '12 Hours', val: 12, unit: 'hours' as const },
-                        { label: '24 Hours (1 Day)', val: 24, unit: 'hours' as const },
-                        { label: '3 Days', val: 3, unit: 'days' as const },
-                        { label: '7 Days', val: 7, unit: 'days' as const },
+                        { label: '30 Mins', val: '30', unit: 'minutes' as const },
+                        { label: '1 Hour', val: '1', unit: 'hours' as const },
+                        { label: '6 Hours', val: '6', unit: 'hours' as const },
+                        { label: '12 Hours', val: '12', unit: 'hours' as const },
+                        { label: '24 Hours (1 Day)', val: '24', unit: 'hours' as const },
+                        { label: '3 Days', val: '3', unit: 'days' as const },
+                        { label: '7 Days', val: '7', unit: 'days' as const },
+                        { label: '30 Days', val: '30', unit: 'days' as const },
+                        { label: '3 Months', val: '3', unit: 'months' as const },
                       ].map((preset) => (
                         <button
                           key={preset.label}
@@ -1116,17 +1237,18 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
                     {/* Custom Duration Inputs */}
                     <div className="pt-1.5 border-t border-amber-200/60 flex flex-wrap items-center gap-2">
-                      <span className="text-slate-600 font-bold text-[11px]">Custom:</span>
+                      <span className="text-slate-600 font-bold text-[11px]">Custom Duration (कस्टम समय):</span>
                       <input
-                        type="number"
-                        min="1"
-                        max="999"
+                        type="text"
+                        inputMode="numeric"
                         value={appointDurationVal}
                         onChange={(e) => {
-                          setAppointDurationVal(parseInt(e.target.value) || 1);
+                          const val = e.target.value.replace(/[^0-9]/g, '');
+                          setAppointDurationVal(val);
                           setAppointCustomDatetime('');
                         }}
-                        className="w-16 px-2.5 py-1 rounded-lg border border-slate-300 text-center font-bold bg-white"
+                        placeholder="e.g. 15, 45, 90"
+                        className="w-20 px-2.5 py-1.5 rounded-lg border border-slate-300 text-center font-bold bg-white text-xs"
                       />
                       <select
                         value={appointDurationUnit}
@@ -1134,34 +1256,44 @@ export const UsersView: React.FC<UsersViewProps> = ({
                           setAppointDurationUnit(e.target.value as any);
                           setAppointCustomDatetime('');
                         }}
-                        className="px-2.5 py-1 rounded-lg border border-slate-300 font-bold bg-white"
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold bg-white text-xs"
                       >
                         <option value="minutes">Minutes (मिनट)</option>
                         <option value="hours">Hours (घंटे)</option>
                         <option value="days">Days (दिन)</option>
+                        <option value="months">Months (महीने)</option>
                       </select>
                     </div>
 
                     {/* Exact datetime picker */}
                     <div className="pt-1.5 border-t border-amber-200/60 flex flex-wrap items-center gap-2">
-                      <span className="text-slate-600 font-semibold text-[11px]">Or exact date/time:</span>
+                      <span className="text-slate-600 font-semibold text-[11px]">Or exact date/time (निश्चित तिथि व समय):</span>
                       <input
                         type="datetime-local"
                         value={appointCustomDatetime}
                         onChange={(e) => setAppointCustomDatetime(e.target.value)}
-                        className="px-2 py-1 rounded-lg border border-slate-300 font-mono text-[11px] bg-white"
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 font-mono text-[11px] bg-white"
                       />
                     </div>
 
                     {/* Live Preview */}
-                    <div className="p-2 rounded-xl bg-white border border-amber-300/80 text-[11px] text-amber-900 font-medium">
-                      ⏳ <span className="font-bold">Expires:</span>{' '}
-                      {appointCustomDatetime
-                        ? formatReadableDate(fromLocalDatetimeInputValue(appointCustomDatetime))
-                        : formatReadableDate(
-                            calculateExpiryTimestamp(appointDurationVal, appointDurationUnit)
-                          )}{' '}
-                      — <span className="text-rose-700 font-bold">लॉगिन इसके बाद तुरंत ब्लॉक हो जाएगा।</span>
+                    <div className="p-2.5 rounded-xl bg-white border border-amber-300/80 text-[11px] text-amber-900 font-medium space-y-0.5">
+                      <div>
+                        ⏳ <span className="font-bold">Expires:</span>{' '}
+                        <span className="font-bold text-amber-950">
+                          {appointCustomDatetime
+                            ? formatReadableDate(fromLocalDatetimeInputValue(appointCustomDatetime))
+                            : formatReadableDate(
+                                calculateExpiryTimestamp(
+                                  Math.max(1, parseInt(appointDurationVal) || 1),
+                                  appointDurationUnit
+                                )
+                              )}
+                        </span>
+                      </div>
+                      <div className="text-rose-700 text-[10px] font-semibold">
+                        🔒 लॉगिन इसके बाद स्वतः बंद व ब्लॉक हो जाएगा।
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1310,11 +1442,13 @@ export const UsersView: React.FC<UsersViewProps> = ({
                 </label>
                 <div className="flex flex-wrap gap-1.5">
                   {[
-                    { label: '+30 Mins', val: 30, unit: 'minutes' as const },
-                    { label: '+1 Hour', val: 1, unit: 'hours' as const },
-                    { label: '+6 Hours', val: 6, unit: 'hours' as const },
-                    { label: '+24 Hours', val: 24, unit: 'hours' as const },
-                    { label: '+3 Days', val: 3, unit: 'days' as const },
+                    { label: '+30 Mins', val: '30', unit: 'minutes' as const },
+                    { label: '+1 Hour', val: '1', unit: 'hours' as const },
+                    { label: '+6 Hours', val: '6', unit: 'hours' as const },
+                    { label: '+24 Hours', val: '24', unit: 'hours' as const },
+                    { label: '+3 Days', val: '3', unit: 'days' as const },
+                    { label: '+7 Days', val: '7', unit: 'days' as const },
+                    { label: '+30 Days', val: '30', unit: 'days' as const },
                   ].map((p) => (
                     <button
                       key={p.label}
@@ -1337,26 +1471,27 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
               <div className="flex items-center gap-2">
                 <input
-                  type="number"
-                  min="1"
-                  max="999"
+                  type="text"
+                  inputMode="numeric"
                   value={extendVal}
-                  onChange={(e) => setExtendVal(parseInt(e.target.value) || 1)}
-                  className="w-16 px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-center"
+                  onChange={(e) => setExtendVal(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="e.g. 15, 45, 90"
+                  className="w-20 px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-center bg-white"
                 />
                 <select
                   value={extendUnit}
                   onChange={(e) => setExtendUnit(e.target.value as any)}
                   className="px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold bg-white"
                 >
-                  <option value="minutes">Minutes</option>
-                  <option value="hours">Hours</option>
-                  <option value="days">Days</option>
+                  <option value="minutes">Minutes (मिनट)</option>
+                  <option value="hours">Hours (घंटे)</option>
+                  <option value="days">Days (दिन)</option>
+                  <option value="months">Months (महीने)</option>
                 </select>
               </div>
 
-              <div className="p-2 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 text-[11px]">
-                New Expiry will be: <span className="font-bold">{formatReadableDate(calculateExpiryTimestamp(extendVal, extendUnit))}</span>
+              <div className="p-2.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 text-[11px]">
+                New Expiry will be: <span className="font-bold">{formatReadableDate(calculateExpiryTimestamp(Math.max(1, parseInt(extendVal) || 1), extendUnit))}</span>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
@@ -1380,7 +1515,250 @@ export const UsersView: React.FC<UsersViewProps> = ({
         </div>
       )}
 
-      {/* ================= MODAL 3: ELEVATE STUDENT TO TEMP ADMIN / DEV ================= */}
+      {/* ================= MODAL 3: UNIVERSAL MANAGE ACCESS & EXPIRY (CONVERT PERMANENT <-> TEMPORARY) ================= */}
+      {manageAccessUser && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-100 text-indigo-700">
+                  <Timer className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-sm">
+                    Manage Access & Expiry (एक्सेस एवं वैधता प्रबंधन)
+                  </h3>
+                  <p className="text-[11px] text-slate-500 truncate max-w-[280px]">
+                    {manageAccessUser.name || 'User'} ({manageAccessUser.email})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setManageAccessUser(null)}
+                className="text-slate-400 hover:text-slate-700 text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveManageAccess} className="space-y-4 text-xs">
+              {/* Access Mode Switch */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1.5">
+                  Select Access Type (एक्सेस प्रकार चुनें):
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManageIsTemporary(false);
+                      setManageCustomDatetime('');
+                    }}
+                    className={`p-3 rounded-2xl border text-left transition cursor-pointer flex items-center gap-2.5 ${
+                      !manageIsTemporary
+                        ? 'border-indigo-600 bg-indigo-50/60 text-indigo-950 font-bold ring-2 ring-indigo-500/20'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <Shield className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <div>
+                      <div className="font-extrabold">Permanent (स्थायी)</div>
+                      <div className="text-[10px] font-normal text-slate-500">No expiration date</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setManageIsTemporary(true)}
+                    className={`p-3 rounded-2xl border text-left transition cursor-pointer flex items-center gap-2.5 ${
+                      manageIsTemporary
+                        ? 'border-amber-600 bg-amber-50/60 text-amber-950 font-bold ring-2 ring-amber-500/20'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                    }`}
+                  >
+                    <Timer className="w-4 h-4 text-amber-600 shrink-0" />
+                    <div>
+                      <div className="font-extrabold">Temporary ⏳ (अस्थायी)</div>
+                      <div className="text-[10px] font-normal text-slate-500">Auto-expires after time</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* If Temporary: Duration, Presets, Custom Number, Unit, Datetime-local */}
+              {manageIsTemporary && (
+                <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-amber-950 flex items-center gap-1.5 text-xs">
+                      <Clock className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Set Expiry Duration (वैधता समय सीमा)</span>
+                    </span>
+                  </div>
+
+                  {/* Quick Presets */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { label: '30 Mins', val: '30', unit: 'minutes' as const },
+                      { label: '1 Hour', val: '1', unit: 'hours' as const },
+                      { label: '6 Hours', val: '6', unit: 'hours' as const },
+                      { label: '12 Hours', val: '12', unit: 'hours' as const },
+                      { label: '24 Hours (1 Day)', val: '24', unit: 'hours' as const },
+                      { label: '3 Days', val: '3', unit: 'days' as const },
+                      { label: '7 Days', val: '7', unit: 'days' as const },
+                      { label: '30 Days (1 Month)', val: '30', unit: 'days' as const },
+                      { label: '3 Months', val: '3', unit: 'months' as const },
+                      { label: '1 Year', val: '1', unit: 'years' as const },
+                    ].map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => {
+                          setManageDurationVal(preset.val);
+                          setManageDurationUnit(preset.unit);
+                          setManageCustomDatetime('');
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                          !manageCustomDatetime &&
+                          manageDurationVal === preset.val &&
+                          manageDurationUnit === preset.unit
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+                            : 'bg-white text-amber-950 border-amber-300 hover:bg-amber-100'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom Duration Input */}
+                  <div className="pt-2 border-t border-amber-200/60 flex flex-wrap items-center gap-2">
+                    <span className="text-slate-700 font-bold text-[11px]">Custom Duration (कस्टम समय):</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={manageDurationVal}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, '');
+                        setManageDurationVal(val);
+                        setManageCustomDatetime('');
+                      }}
+                      placeholder="e.g. 15, 45, 90"
+                      className="w-20 px-2.5 py-1.5 rounded-lg border border-slate-300 text-center font-bold bg-white text-xs"
+                    />
+                    <select
+                      value={manageDurationUnit}
+                      onChange={(e) => {
+                        setManageDurationUnit(e.target.value as any);
+                        setManageCustomDatetime('');
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold bg-white text-xs"
+                    >
+                      <option value="minutes">Minutes (मिनट)</option>
+                      <option value="hours">Hours (घंटे)</option>
+                      <option value="days">Days (दिन)</option>
+                      <option value="months">Months (महीने)</option>
+                      <option value="years">Years (वर्ष)</option>
+                    </select>
+                  </div>
+
+                  {/* Exact Date & Time Picker */}
+                  <div className="pt-2 border-t border-amber-200/60 flex flex-wrap items-center gap-2">
+                    <span className="text-slate-700 font-semibold text-[11px]">Or exact date/time (निश्चित तिथि व समय):</span>
+                    <input
+                      type="datetime-local"
+                      value={manageCustomDatetime}
+                      onChange={(e) => setManageCustomDatetime(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 font-mono text-[11px] bg-white"
+                    />
+                  </div>
+
+                  {/* Live Expiry Preview */}
+                  <div className="p-2.5 rounded-xl bg-white border border-amber-300/80 text-[11px] text-amber-900 font-medium space-y-0.5">
+                    <div>
+                      ⏳ <span className="font-bold">New Expiry:</span>{' '}
+                      <span className="font-bold text-amber-950">
+                        {manageCustomDatetime
+                          ? formatReadableDate(fromLocalDatetimeInputValue(manageCustomDatetime))
+                          : formatReadableDate(
+                              calculateExpiryTimestamp(
+                                Math.max(1, parseInt(manageDurationVal) || 1),
+                                manageDurationUnit
+                              )
+                            )}
+                      </span>
+                    </div>
+                    <div className="text-rose-700 text-[10px] font-semibold">
+                      🔒 समय समाप्त होने पर यूजर का एडमिन/स्टाफ लॉगिन तुरंत ब्लॉक हो जाएगा।
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Role Selection */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1.5">Assign Role (भूमिका):</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setManageRole('content_admin')}
+                    className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                      manageRole === 'content_admin' || manageRole === 'admin'
+                        ? 'border-indigo-600 bg-indigo-50/60 text-indigo-950 font-bold'
+                        : 'border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Academic Admin</span>
+                    </div>
+                    <p className="text-[10px] font-normal text-slate-500 mt-0.5">
+                      Lectures, PDFs, MCQs, mock tests.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setManageRole('developer')}
+                    className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                      manageRole === 'developer'
+                        ? 'border-amber-600 bg-amber-50/60 text-amber-950 font-bold'
+                        : 'border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Code2 className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Developer</span>
+                    </div>
+                    <p className="text-[10px] font-normal text-slate-500 mt-0.5">
+                      Full developer console & remote app tools.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setManageAccessUser(null)}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={manageSubmitting}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  {manageSubmitting ? 'Saving Access...' : 'Save Access Settings (सहेजें)'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 4: ELEVATE STUDENT TO TEMP ADMIN / DEV ================= */}
       {elevateUser && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95">
@@ -1452,11 +1830,11 @@ export const UsersView: React.FC<UsersViewProps> = ({
                   <span className="text-[11px] font-bold text-amber-900 block">Duration:</span>
                   <div className="flex items-center gap-2">
                     <input
-                      type="number"
-                      min="1"
-                      max="999"
+                      type="text"
+                      inputMode="numeric"
                       value={elevateDurationVal}
-                      onChange={(e) => setElevateDurationVal(parseInt(e.target.value) || 1)}
+                      onChange={(e) => setElevateDurationVal(e.target.value.replace(/[^0-9]/g, ''))}
+                      placeholder="24"
                       className="w-16 px-2 py-1 rounded-lg border border-slate-300 font-bold text-center bg-white"
                     />
                     <select
@@ -1464,13 +1842,14 @@ export const UsersView: React.FC<UsersViewProps> = ({
                       onChange={(e) => setElevateDurationUnit(e.target.value as any)}
                       className="px-2 py-1 rounded-lg border border-slate-300 font-bold bg-white"
                     >
-                      <option value="minutes">Minutes</option>
-                      <option value="hours">Hours</option>
-                      <option value="days">Days</option>
+                      <option value="minutes">Minutes (मिनट)</option>
+                      <option value="hours">Hours (घंटे)</option>
+                      <option value="days">Days (दिन)</option>
+                      <option value="months">Months (महीने)</option>
                     </select>
                   </div>
                   <div className="text-[10px] text-amber-800">
-                    Expires: {formatReadableDate(calculateExpiryTimestamp(elevateDurationVal, elevateDurationUnit))}
+                    Expires: {formatReadableDate(calculateExpiryTimestamp(Math.max(1, parseInt(elevateDurationVal) || 1), elevateDurationUnit))}
                   </div>
                 </div>
               )}
@@ -1496,7 +1875,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
         </div>
       )}
 
-      {/* ================= MODAL 4: EDIT PASSWORD MODAL ================= */}
+      {/* ================= MODAL 5: EDIT PASSWORD MODAL ================= */}
       {isPasswordModalOpen && passwordEditUser && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95">

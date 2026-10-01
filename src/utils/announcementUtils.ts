@@ -76,7 +76,7 @@ export function formatTimeRemaining(expiresAt?: string): {
  */
 export function calculateExpiryTimestamp(
   value: number,
-  unit: 'minutes' | 'hours' | 'days'
+  unit: 'minutes' | 'hours' | 'days' | 'months' | 'years'
 ): string {
   const safeVal = Math.max(1, value);
   const now = Date.now();
@@ -85,6 +85,10 @@ export function calculateExpiryTimestamp(
     msToAdd = safeVal * 60 * 60 * 1000;
   } else if (unit === 'days') {
     msToAdd = safeVal * 24 * 60 * 60 * 1000;
+  } else if (unit === 'months') {
+    msToAdd = safeVal * 30 * 24 * 60 * 60 * 1000;
+  } else if (unit === 'years') {
+    msToAdd = safeVal * 365 * 24 * 60 * 60 * 1000;
   }
   return new Date(now + msToAdd).toISOString();
 }

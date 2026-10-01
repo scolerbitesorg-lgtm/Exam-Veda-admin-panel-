@@ -11,6 +11,7 @@ export type AdminTab =
   | 'mcqs'
   | 'mocktests'
   | 'users'
+  | 'history'
   | 'dev-console'
   | 'ai'
   | 'settings'
@@ -51,6 +52,76 @@ export interface FeatureRegistryItem {
   developerNotes?: string;
   routeTab?: string;
   tags?: string[];
+}
+
+export type HistoryEntityType =
+  | 'subject'
+  | 'topic'
+  | 'lecture'
+  | 'note'
+  | 'mcq'
+  | 'mockTest'
+  | 'appSettings'
+  | 'user'
+  | 'role'
+  | 'banner'
+  | 'ai'
+  | 'system';
+
+export type HistoryActionType =
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'publish'
+  | 'unpublish'
+  | 'restore'
+  | 're_add'
+  | 'bulk_create'
+  | 'bulk_delete'
+  | 'role_change'
+  | 'ban'
+  | 'unban'
+  | 'password_reset'
+  | 'settings_change'
+  | 'theme_change';
+
+export interface ActivityHistoryRecord {
+  id: string;
+  entityType: HistoryEntityType;
+  entityId: string;
+  entityTitle: string;
+  action: HistoryActionType;
+  actorEmail: string;
+  actorName: string;
+  actorRole: string;
+  timestamp: string;
+  summary: string;
+  details?: string;
+  previousData?: any; // Snapshot before modification or deletion for Re-Add / Restore!
+  newData?: any; // Snapshot of newly created / updated data
+  canRestore?: boolean;
+  isRestored?: boolean;
+  restoredAt?: string;
+  restoredBy?: string;
+  tags?: string[];
+}
+
+export interface LoginHistoryRecord {
+  id: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
+  userRole: UserRole | string;
+  loginAt: string;
+  ipAddress?: string;
+  userAgent?: string;
+  deviceType?: 'desktop' | 'mobile' | 'tablet' | string;
+  browser?: string;
+  os?: string;
+  status: 'success' | 'failed' | 'locked';
+  authMethod?: 'password' | 'google' | 'developer_preset' | 'token' | string;
+  failureReason?: string;
+  sessionDurationMinutes?: number;
 }
 
 export interface AuditLogEntry {
@@ -435,6 +506,11 @@ export interface MCQ {
   correctAnswer: number; // 0, 1, 2, 3
   explanation: string;
   difficulty?: 'easy' | 'medium' | 'hard';
+  examTag?: string; // e.g. "SSC CGL Mains 2018", "UPSC Prelims 2021", "CHSL 2023"
+  examDate?: string; // e.g. "15-10-2018", "2018", "March 2023"
+  exam?: string; // e.g. "SSC CGL", "RRB NTPC"
+  shift?: string; // e.g. "Mains", "Shift 2", "Tier 1"
+  year?: number | string; // e.g. 2018
   published: boolean;
   order?: number;
   createdAt?: string;

@@ -291,8 +291,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     count?: number;
   }[] = [
     { id: 'notes', label: 'Notes & PDFs', icon: FileText, count: notes.length },
-    { id: 'dev-console', label: 'Remote App Theme Console', icon: Code2 },
-    { id: 'settings', label: 'System Settings', icon: Layers },
+    ...(isDeveloper
+      ? ([
+          { id: 'dev-console', label: 'Remote App Theme Console', icon: Code2 },
+          { id: 'settings', label: 'System Settings', icon: Layers },
+        ] as { id: AdminTab; label: string; icon: React.ComponentType<{ className?: string }>; count?: number }[])
+      : []),
   ];
 
   // Combined Recent Activity Stream

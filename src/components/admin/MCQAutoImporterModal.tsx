@@ -18,9 +18,12 @@ import {
   Check,
   Zap,
   Layers,
+  Calendar,
+  Award,
 } from 'lucide-react';
 import type { Subject, Topic, MCQ } from '../../types';
 import { addMCQsBatch } from '../../services/dbService';
+import { detectExamMetadata } from '../../utils/examTagDetector';
 
 interface MCQAutoImporterModalProps {
   isOpen: boolean;
@@ -43,12 +46,17 @@ export interface ParsedItem {
   correctLetter: 'A' | 'B' | 'C' | 'D';
   explanation: string;
   difficulty: 'easy' | 'medium' | 'hard';
+  examTag?: string;
+  examDate?: string;
+  exam?: string;
+  shift?: string;
+  year?: number | string;
   errors: string[];
   warnings: string[];
   isDuplicate: boolean;
 }
 
-const HINDI_SAMPLE_INPUT = `1. भारत का राष्ट्रीय पुष्प क्या है?
+const HINDI_SAMPLE_INPUT = `1. भारत का राष्ट्रीय पुष्प क्या है? [UPPSC 2022]
 A. गुलाब
 B. कमल
 C. गेंदा
@@ -56,7 +64,7 @@ D. चमेली
 Ans. B
 Exp: कमल (Nelumbo nucifera) भारत का राष्ट्रीय पुष्प है।
 
-2. भारतीय संविधान का कौन सा अनुच्छेद 'मौलिक अधिकारों' से संबंधित है?
+2. भारतीय संविधान का कौन सा अनुच्छेद 'मौलिक अधिकारों' से संबंधित है? (CGL mains 2018)
 A. अनुच्छेद 5 से 11
 B. अनुच्छेद 12 से 35
 C. अनुच्छेद 36 से 51
@@ -64,13 +72,21 @@ D. अनुच्छेद 51A
 Ans. B
 Exp: संविधान के भाग-3 में अनुच्छेद 12 से 35 तक मौलिक अधिकारों (Fundamental Rights) का उल्लेख है।
 
-3. मानव शरीर की सबसे बड़ी ग्रंथि कौन सी है?
+3. मानव शरीर की सबसे बड़ी ग्रंथि कौन सी है? [CHSL 2023, Date: 15-03-2023]
 A. अग्न्याशय (Pancreas)
 B. यकृत (Liver)
 C. थायरॉयड (Thyroid)
 D. पिट्यूटरी (Pituitary)
 Ans. B
-Exp: यकृत (Liver) मानव शरीर की सबसे बड़ी ग्रंथि है जो पित्त (Bile) का निर्माण करती है।`;
+Exp: यकृत (Liver) मानव शरीर की सबसे बड़ी ग्रंथि है जो पित्त (Bile) का निर्माण करती है।
+
+4. ध्वनि तरंगें किस माध्यम में गमन नहीं कर सकती हैं?
+A. ठोस (Solid)
+B. द्रव (Liquid)
+C. गैस (Gas)
+D. निर्वात (Vacuum)
+Ans. D
+Exp: ध्वनि तरंगें यांत्रिक तरंगें हैं जिन्हें संचरण के लिए भौतिक माध्यम की आवश्यकता होती है, निर्वात में नहीं चल सकतीं।`;
 
 export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
   isOpen,
@@ -83,6 +99,7 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
   onSuccess,
 }) => {
   const [inputText, setInputText] = useState('');
+  const [debouncedInputText, setDebouncedInputText] = useState('');
   const [selectedSubjectId, setSelectedSubjectId] = useState(
     defaultSubjectId || subjects[0]?.id || ''
   );
@@ -93,6 +110,8 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
     defaultTopicId || availableTopics[0]?.id || ''
   );
   const [defaultDifficulty, setDefaultDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [batchExamDate, setBatchExamDate] = useState('');
+  const [batchExamTag, setBatchExamTag] = useState('');
   const [examNotes, setExamNotes] = useState('');
   const [showPreviewList, setShowPreviewList] = useState(false);
 
@@ -106,17 +125,37 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
     if (defaultTopicId) setSelectedTopicId(defaultTopicId);
   }, [defaultSubjectId, defaultTopicId]);
 
+  // Debounce input text changes so typing/pasting is lag-free
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedInputText(inputText);
+    }, 120);
+    return () => clearTimeout(handler);
+  }, [inputText]);
+
   const handleSubjectChange = (newSubjectId: string) => {
     setSelectedSubjectId(newSubjectId);
     const filtered = topics.filter((t) => t.subjectId === newSubjectId);
     setSelectedTopicId(filtered[0]?.id || '');
   };
 
+  // Pre-normalized Set for instant O(1) duplicate checks
+  const existingNormalizedSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const em of existingMCQs) {
+      if (em.question) {
+        const norm = em.question.toLowerCase().replace(/[^a-zA-Z0-9\u0900-\u097F]/g, '');
+        if (norm.length > 5) set.add(norm);
+      }
+    }
+    return set;
+  }, [existingMCQs]);
+
   // Robust Auto Parser
   const parsedItems = useMemo<ParsedItem[]>(() => {
-    if (!inputText.trim()) return [];
+    if (!debouncedInputText.trim()) return [];
 
-    const lines = inputText.split(/\r?\n/);
+    const lines = debouncedInputText.split(/\r?\n/);
     const rawBlocks: string[][] = [];
     let currentBlock: string[] = [];
 
@@ -235,8 +274,12 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
         }
       });
 
-      const finalQuestion = questionLines.join(' ').trim();
+      const rawCombinedQuestion = questionLines.join(' ').trim();
       const finalExplanation = explanationLines.join(' ').trim();
+
+      // Auto-Detect Exam Tag, Date, Shift, and Year (Supports [CGL mains 2018], (ex- chsl 2023), separate Exam/Date lines, etc.)
+      const examMeta = detectExamMetadata(rawCombinedQuestion, block);
+      const finalQuestion = examMeta.cleanQuestion;
 
       let correctOption = 0;
       let finalLetter: 'A' | 'B' | 'C' | 'D' = 'A';
@@ -266,10 +309,7 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
       }
 
       const normalizedQ = finalQuestion.toLowerCase().replace(/[^a-zA-Z0-9\u0900-\u097F]/g, '');
-      const isDuplicate = existingMCQs.some((em) => {
-        const norm = em.question.toLowerCase().replace(/[^a-zA-Z0-9\u0900-\u097F]/g, '');
-        return norm === normalizedQ && normalizedQ.length > 5;
-      });
+      const isDuplicate = normalizedQ.length > 5 && existingNormalizedSet.has(normalizedQ);
 
       if (isDuplicate) {
         warnings.push('यह प्रश्न पहले से बैंक में मौजूद हो सकता है (Duplicate)');
@@ -285,6 +325,11 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
         correctLetter: finalLetter,
         explanation: finalExplanation,
         difficulty: defaultDifficulty,
+        examTag: examMeta.examTag || batchExamTag.trim() || undefined,
+        examDate: examMeta.examDate || batchExamDate.trim() || undefined,
+        exam: examMeta.exam,
+        shift: examMeta.shift,
+        year: examMeta.year,
         errors,
         warnings,
         isDuplicate,
@@ -292,7 +337,7 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
     });
 
     return items;
-  }, [inputText, defaultDifficulty, existingMCQs]);
+  }, [debouncedInputText, defaultDifficulty, existingNormalizedSet, batchExamDate, batchExamTag]);
 
   const validCount = parsedItems.filter((i) => i.errors.length === 0).length;
 
@@ -337,6 +382,11 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
           correctAnswer: item.correctOption,
           explanation: item.explanation,
           difficulty: item.difficulty,
+          examTag: item.examTag || batchExamTag.trim() || undefined,
+          examDate: item.examDate || batchExamDate.trim() || undefined,
+          exam: item.exam || undefined,
+          shift: item.shift || undefined,
+          year: item.year || undefined,
           published: true,
           order: index + 1,
         };
@@ -545,7 +595,7 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      📌 परीक्षा उपयोगी बिंदु...
+                      📌 परीक्षा उपयोगी बिंदु (Notes)...
                     </label>
                     <input
                       type="text"
@@ -554,6 +604,47 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
                       placeholder="📌 परीक्षा उपयोगी बिंदु..."
                       className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-purple-500"
                     />
+                  </div>
+                </div>
+
+                {/* Batch Exam Date & Exam Tag for entire batch */}
+                <div className="p-3 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                      <Award className="w-3.5 h-3.5 text-amber-600" />
+                      संपूर्ण बैच हेतु परीक्षा विवरण (Batch Exam Date & Tag)
+                    </span>
+                    <span className="text-[10px] text-amber-800 font-bold bg-amber-100 px-2 py-0.5 rounded-md">
+                      Optional
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-0.5 flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-amber-600" />
+                        <span>Batch Exam Date / Year (दिनांक या वर्ष)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={batchExamDate}
+                        onChange={(e) => setBatchExamDate(e.target.value)}
+                        placeholder="उदा. 15-10-2018 या 2023"
+                        className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-slate-300 text-xs font-medium text-slate-800 focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-700 mb-0.5 flex items-center gap-1">
+                        <Award className="w-3 h-3 text-amber-600" />
+                        <span>Batch Exam Tag / Shift (परीक्षा नाम व शिफ्ट)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={batchExamTag}
+                        onChange={(e) => setBatchExamTag(e.target.value)}
+                        placeholder="उदा. SSC CGL Mains 2018"
+                        className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-slate-300 text-xs font-medium text-slate-800 focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -641,13 +732,21 @@ Exp: विस्तृत व्याख्या यहाँ...`}
                             : 'bg-slate-50 border-slate-200'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-extrabold text-slate-900">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="font-extrabold text-slate-900 flex-1 min-w-0">
                             प्रश्न {idx + 1}: {item.question || 'प्रश्न अनुपलब्ध'}
                           </span>
-                          <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-black text-[10px]">
-                            उत्तर: ({item.correctLetter})
-                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {(item.examTag || item.examDate) && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                                <Award className="w-3 h-3 text-amber-600" />
+                                {item.examTag || item.examDate}
+                              </span>
+                            )}
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-black text-[10px]">
+                              उत्तर: ({item.correctLetter})
+                            </span>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-600">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   HelpCircle,
   Plus,
@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Sparkles,
   Award,
+  Calendar,
   Layers,
   Search,
   FileSpreadsheet,
@@ -18,6 +19,7 @@ import {
   FolderTree,
   ArrowLeft,
   ChevronRight,
+  ChevronLeft,
   BookOpen,
   Folder,
   SlidersHorizontal,
@@ -30,6 +32,7 @@ import { BulkImportMCQModal } from './BulkImportMCQModal';
 import { MCQAutoImporterModal } from './MCQAutoImporterModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { QuizThemeSettingsModal } from './QuizThemeSettingsModal';
+import { detectExamMetadata } from '../../utils/examTagDetector';
 import type { Subject, Topic, MCQ, AppSettings } from '../../types';
 
 interface MCQsViewProps {
@@ -100,46 +103,110 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
   const [correctAnswer, setCorrectAnswer] = useState<number>(0);
   const [explanation, setExplanation] = useState('');
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [examTag, setExamTag] = useState('');
+  const [examDate, setExamDate] = useState('');
+  const [shift, setShift] = useState('');
   const [published, setPublished] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Filtered topics for the folder view
-  const filteredTopics = topics.filter((t) => {
-    if (filterSubjectId && t.subjectId !== filterSubjectId) return false;
-    if (searchWord) {
-      const title = t.title || (t as any).name || '';
-      const hindi = t.hindiTitle || (t as any).hindiName || '';
-      const matchTopic =
-        title.toLowerCase().includes(searchWord.toLowerCase()) ||
-        hindi.includes(searchWord);
-      return matchTopic;
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  // Fast set of valid topic IDs
+  const validTopicIdsSet = useMemo(() => new Set(topics.map((t) => t.id)), [topics]);
+
+  // Pre-calculate per-topic counts in a single O(N) pass
+  const topicStatsMap = useMemo(() => {
+    const map = new Map<string, { total: number; easy: number; medium: number; hard: number; live: number }>();
+    for (let i = 0; i < mcqs.length; i++) {
+      const m = mcqs[i];
+      if (!m.topicId) continue;
+      let stat = map.get(m.topicId);
+      if (!stat) {
+        stat = { total: 0, easy: 0, medium: 0, hard: 0, live: 0 };
+        map.set(m.topicId, stat);
+      }
+      stat.total++;
+      if (m.difficulty === 'easy') stat.easy++;
+      else if (m.difficulty === 'hard') stat.hard++;
+      else stat.medium++;
+      if (m.published !== false) stat.live++;
     }
-    return true;
-  });
+    return map;
+  }, [mcqs]);
+
+  // Pre-calculate per-subject counts in a single O(N) pass
+  const subjectMCQCountsMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < mcqs.length; i++) {
+      const m = mcqs[i];
+      if (!m.subjectId) continue;
+      map.set(m.subjectId, (map.get(m.subjectId) || 0) + 1);
+    }
+    return map;
+  }, [mcqs]);
+
+  // Filtered topics for the folder view
+  const filteredTopics = useMemo(() => {
+    const lowerSearch = searchWord.toLowerCase().trim();
+    return topics.filter((t) => {
+      if (filterSubjectId && t.subjectId !== filterSubjectId) return false;
+      if (lowerSearch) {
+        const title = (t.title || (t as any).name || '').toLowerCase();
+        const hindi = t.hindiTitle || (t as any).hindiName || '';
+        return title.includes(lowerSearch) || hindi.includes(searchWord);
+      }
+      return true;
+    });
+  }, [topics, filterSubjectId, searchWord]);
 
   // Calculate unassigned questions (without valid topic)
-  const unassignedMCQs = mcqs.filter((m) => !m.topicId || !topics.some((t) => t.id === m.topicId));
+  const unassignedMCQs = useMemo(() => {
+    return mcqs.filter((m) => !m.topicId || !validTopicIdsSet.has(m.topicId));
+  }, [mcqs, validTopicIdsSet]);
 
   // Active topic object when drilled into a folder
-  const activeTopic = topics.find((t) => t.id === selectedFolderTopicId);
-  const activeTopicSubject = subjects.find((s) => s.id === activeTopic?.subjectId);
+  const activeTopic = useMemo(() => {
+    return topics.find((t) => t.id === selectedFolderTopicId);
+  }, [topics, selectedFolderTopicId]);
+
+  const activeTopicSubject = useMemo(() => {
+    return subjects.find((s) => s.id === activeTopic?.subjectId);
+  }, [subjects, activeTopic]);
 
   // Filtered MCQs for the list or specific opened folder
-  const filteredMCQs = mcqs.filter((m) => {
-    if (selectedFolderTopicId === 'unassigned') {
-      return !m.topicId || !topics.some((t) => t.id === m.topicId);
-    }
-    if (selectedFolderTopicId && m.topicId !== selectedFolderTopicId) return false;
-    if (!selectedFolderTopicId && filterSubjectId && m.subjectId !== filterSubjectId) return false;
-    if (filterDifficulty !== 'all' && m.difficulty !== filterDifficulty) return false;
-    if (searchWord) {
-      const matchQ =
-        m.question.toLowerCase().includes(searchWord.toLowerCase()) ||
-        (m.hindiQuestion || '').includes(searchWord);
-      return matchQ;
-    }
-    return true;
-  });
+  const filteredMCQs = useMemo(() => {
+    const lowerSearch = searchWord.toLowerCase().trim();
+    return mcqs.filter((m) => {
+      if (selectedFolderTopicId === 'unassigned') {
+        return !m.topicId || !validTopicIdsSet.has(m.topicId);
+      }
+      if (selectedFolderTopicId && m.topicId !== selectedFolderTopicId) return false;
+      if (!selectedFolderTopicId && filterSubjectId && m.subjectId !== filterSubjectId) return false;
+      if (filterDifficulty !== 'all' && m.difficulty !== filterDifficulty) return false;
+      if (lowerSearch) {
+        return (
+          m.question.toLowerCase().includes(lowerSearch) ||
+          (m.hindiQuestion || '').toLowerCase().includes(lowerSearch) ||
+          (m.examTag || '').toLowerCase().includes(lowerSearch)
+        );
+      }
+      return true;
+    });
+  }, [mcqs, selectedFolderTopicId, filterSubjectId, filterDifficulty, searchWord, validTopicIdsSet]);
+
+  // Reset page to 1 when filters or folder selection change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedFolderTopicId, filterSubjectId, filterDifficulty, searchWord, pageSize]);
+
+  // Paginated slice
+  const totalPages = Math.max(1, Math.ceil(filteredMCQs.length / pageSize));
+  const paginatedMCQs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredMCQs.slice(start, start + pageSize);
+  }, [filteredMCQs, currentPage, pageSize]);
 
   const openAddModal = (targetTopicId?: string) => {
     setEditingMCQ(null);
@@ -155,6 +222,9 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
     setCorrectAnswer(0);
     setExplanation('');
     setDifficulty('medium');
+    setExamTag('');
+    setExamDate('');
+    setShift('');
     setPublished(true);
     setIsModalOpen(true);
   };
@@ -174,6 +244,9 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
     setCorrectAnswer(m.correctAnswer ?? 0);
     setExplanation(m.explanation || '');
     setDifficulty(m.difficulty || 'medium');
+    setExamTag(m.examTag || '');
+    setExamDate(m.examDate || '');
+    setShift(m.shift || '');
     setPublished(m.published ?? true);
     setIsModalOpen(true);
   };
@@ -197,30 +270,49 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
     if (options.some((o) => !o.trim())) return alert('All 4 options (A, B, C, D) are mandatory');
     if (!explanation.trim()) return alert('Please provide an explanation for student learning');
 
+    // Auto-detect exam metadata if present in question text (e.g. "[CGL mains 2018]" or "(chsl 2023)")
+    const detectedMeta = detectExamMetadata(question);
+    const finalQuestion = detectedMeta.cleanQuestion || question.trim();
+    const finalExamTag = examTag.trim() || detectedMeta.examTag || undefined;
+    const finalExamDate = examDate.trim() || detectedMeta.examDate || undefined;
+    const finalShift = shift.trim() || detectedMeta.shift || undefined;
+    const finalExam = detectedMeta.exam || undefined;
+    const finalYear = detectedMeta.year || undefined;
+
     setIsSubmitting(true);
     try {
       if (editingMCQ) {
         await updateMCQ(editingMCQ.id, {
           subjectId: selectedSubjectId,
           topicId: selectedTopicId,
-          question,
+          question: finalQuestion,
           hindiQuestion,
           options,
           correctAnswer,
           explanation,
           difficulty,
+          examTag: finalExamTag,
+          examDate: finalExamDate,
+          exam: finalExam,
+          shift: finalShift,
+          year: finalYear,
           published,
         });
       } else {
         await addMCQ({
           subjectId: selectedSubjectId,
           topicId: selectedTopicId,
-          question,
+          question: finalQuestion,
           hindiQuestion,
           options,
           correctAnswer,
           explanation,
           difficulty,
+          examTag: finalExamTag,
+          examDate: finalExamDate,
+          exam: finalExam,
+          shift: finalShift,
+          year: finalYear,
           published,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -482,7 +574,7 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
               All Subjects ({mcqs.length} MCQs)
             </button>
             {subjects.map((s) => {
-              const subMCQCount = mcqs.filter((m) => m.subjectId === s.id).length;
+              const subMCQCount = subjectMCQCountsMap.get(s.id) || 0;
               return (
                 <button
                   key={s.id}
@@ -544,13 +636,12 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filteredTopics.map((top) => {
                 const sub = subjects.find((s) => s.id === top.subjectId);
-                const topicMCQs = mcqs.filter((m) => m.topicId === top.id);
-                const count = topicMCQs.length;
-
-                const easyCount = topicMCQs.filter((m) => m.difficulty === 'easy').length;
-                const medCount = topicMCQs.filter((m) => (m.difficulty || 'medium') === 'medium').length;
-                const hardCount = topicMCQs.filter((m) => m.difficulty === 'hard').length;
-                const liveCount = topicMCQs.filter((m) => m.published !== false).length;
+                const stat = topicStatsMap.get(top.id) || { total: 0, easy: 0, medium: 0, hard: 0, live: 0 };
+                const count = stat.total;
+                const easyCount = stat.easy;
+                const medCount = stat.medium;
+                const hardCount = stat.hard;
+                const liveCount = stat.live;
 
                 return (
                   <div
@@ -663,9 +754,9 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
       {/* ========================================================================= */}
       {(viewMode === 'list' || selectedFolderTopicId) && (
         <div className="space-y-4">
-          {/* Difficulty Filter bar */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1">
+          {/* Difficulty Filter bar & Page size */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-xs font-bold text-slate-600 mr-1">Difficulty:</span>
               {(['all', 'easy', 'medium', 'hard'] as const).map((diff) => (
                 <button
@@ -673,8 +764,8 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
                   onClick={() => setFilterDifficulty(diff)}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold capitalize transition ${
                     filterDifficulty === diff
-                      ? 'bg-slate-800 text-white'
-                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                      ? 'bg-slate-800 text-white shadow-2xs'
+                      : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
                   }`}
                 >
                   {diff}
@@ -682,9 +773,31 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
               ))}
             </div>
 
-            <span className="text-xs font-semibold text-slate-500">
-              Showing {filteredMCQs.length} question(s)
-            </span>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="flex items-center gap-1.5 text-slate-500 font-medium">
+                <span>Per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 font-bold focus:border-indigo-500"
+                >
+                  <option value={15}>15</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                </select>
+              </div>
+
+              <span className="font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">
+                {filteredMCQs.length === 0
+                  ? '0 MCQs'
+                  : `Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(
+                      currentPage * pageSize,
+                      filteredMCQs.length
+                    )} of ${filteredMCQs.length}`}
+              </span>
+            </div>
           </div>
 
           {filteredMCQs.length === 0 ? (
@@ -692,7 +805,7 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
               <HelpCircle className="w-10 h-10 text-slate-300 mx-auto mb-3" />
               <h3 className="text-sm font-bold text-slate-800">No MCQs found</h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
-                Add your first practice question or bulk import via CSV.
+                Add your practice question or bulk import via CSV/Raw text.
               </p>
               <button
                 onClick={() => openAddModal(selectedFolderTopicId || undefined)}
@@ -703,7 +816,8 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredMCQs.map((m, idx) => {
+              {paginatedMCQs.map((m, localIdx) => {
+                const idx = (currentPage - 1) * pageSize + localIdx;
                 const sub = subjects.find((s) => s.id === m.subjectId);
                 const top = topics.find((t) => t.id === m.topicId);
 
@@ -738,6 +852,13 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
                         >
                           {m.difficulty || 'medium'}
                         </span>
+
+                        {(m.examTag || m.examDate || m.exam) && (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-900 border border-amber-200 text-[10px] font-extrabold flex items-center gap-1">
+                            <Award className="w-3 h-3 text-amber-600" />
+                            {m.examTag || `${m.exam || ''} ${m.examDate || ''}`.trim()}
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1">
@@ -826,6 +947,67 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
                   </div>
                 );
               })}
+
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="pt-4 pb-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200">
+                  <div className="text-xs text-slate-500 font-semibold">
+                    Page <span className="font-extrabold text-slate-900">{currentPage}</span> of{' '}
+                    <span className="font-extrabold text-slate-900">{totalPages}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition shadow-2xs"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <span>Previous</span>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalPages }, (_, i) => i + 1)
+                        .filter((p) => {
+                          if (totalPages <= 7) return true;
+                          if (p === 1 || p === totalPages) return true;
+                          return Math.abs(p - currentPage) <= 1;
+                        })
+                        .map((p, pIdx, arr) => {
+                          const prev = arr[pIdx - 1];
+                          const showEllipsis = prev && p - prev > 1;
+
+                          return (
+                            <React.Fragment key={p}>
+                              {showEllipsis && (
+                                <span className="px-1 text-slate-400 font-bold text-xs">...</span>
+                              )}
+                              <button
+                                onClick={() => setCurrentPage(p)}
+                                className={`w-8 h-8 rounded-xl text-xs font-black transition flex items-center justify-center ${
+                                  currentPage === p
+                                    ? 'bg-indigo-600 text-white shadow-xs scale-105'
+                                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            </React.Fragment>
+                          );
+                        })}
+                    </div>
+
+                    <button
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition shadow-2xs"
+                    >
+                      <span>Next</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -956,6 +1138,48 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Exam Reference & Date (Optional) */}
+              <div className="p-3.5 rounded-2xl bg-indigo-50/50 border border-indigo-100/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-indigo-950 flex items-center gap-1.5 text-xs">
+                    <Award className="w-3.5 h-3.5 text-indigo-600" />
+                    Exam Reference & Date (परीक्षा विवरण - Optional)
+                  </span>
+                  <span className="text-[10px] text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md font-semibold">
+                    वैकल्पिक (Optional)
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Exam Name & Shift (जैसे SSC CGL Mains 2018 / CHSL 2023)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. SSC CGL Mains 2018 / UPSC Prelims 2021"
+                      value={examTag}
+                      onChange={(e) => setExamTag(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Exam Date / Year (दिनांक या वर्ष)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 15-10-2018 / 2023"
+                      value={examDate}
+                      onChange={(e) => setExamDate(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-500 italic">
+                  💡 टिप: आप प्रश्न टेक्स्ट में भी [CGL mains 2018] या (ex- chsl 2023) लिख सकते हैं, सिस्टम इसे अपने आप पहचान लेगा।
+                </p>
               </div>
 
               {/* Explanation & Difficulty */}

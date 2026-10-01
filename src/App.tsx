@@ -12,6 +12,7 @@ import { MockTestsView } from './components/admin/MockTestsView';
 import { UsersView } from './components/admin/UsersView';
 import { DeveloperConsoleView } from './components/admin/DeveloperConsoleView';
 import { SettingsView } from './components/admin/SettingsView';
+import { HistoryView } from './components/admin/HistoryView';
 import { FirebaseSyncView } from './components/admin/FirebaseSyncView';
 import { DeveloperAccessView } from './components/admin/DeveloperAccessView';
 import { StudentAppPreviewModal } from './components/student-preview/StudentAppPreviewModal';
@@ -64,12 +65,122 @@ export const App: React.FC = () => {
   } = useAuth();
 
   // Navigation State
-  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => {
+    if (typeof window !== 'undefined' && window.location.hash) {
+      const hashTab = window.location.hash.replace('#', '') as AdminTab;
+      const validTabs: AdminTab[] = [
+        'dashboard',
+        'subjects',
+        'topics',
+        'lectures',
+        'notes',
+        'mcqs',
+        'mocktests',
+        'users',
+        'settings',
+        'developer-access',
+        'dev-console',
+        'firebase-sync',
+      ];
+      if (validTabs.includes(hashTab)) return hashTab;
+    }
+    return 'dashboard';
+  });
   const [isSidebarMobileOpen, setIsSidebarMobileOpen] = useState(false);
   const [isStudentPreviewOpen, setIsStudentPreviewOpen] = useState(false);
   const [quickCreateType, setQuickCreateType] = useState<
     'subjects' | 'topics' | 'lectures' | 'notes' | 'mcqs' | 'mocktests' | null
   >(null);
+
+  // Synchronize Tab Navigation with Browser History API for natural Back/Forward behavior
+  const navigateToTab = (tab: AdminTab, pushHistory = true) => {
+    setActiveTab(tab);
+    setQuickCreateType(null);
+    if (isSidebarMobileOpen) setIsSidebarMobileOpen(false);
+    if (pushHistory && typeof window !== 'undefined') {
+      const targetHash = `#${tab}`;
+      if (window.location.hash !== targetHash) {
+        window.history.pushState({ tab, isPreview: isStudentPreviewOpen }, '', targetHash);
+      }
+    }
+  };
+
+  const openStudentPreviewModal = () => {
+    setIsStudentPreviewOpen(true);
+    if (typeof window !== 'undefined') {
+      window.history.pushState({ tab: activeTab, isPreview: true }, '', `#preview`);
+    }
+  };
+
+  const closeStudentPreviewModal = () => {
+    setIsStudentPreviewOpen(false);
+    if (typeof window !== 'undefined' && window.location.hash === '#preview') {
+      window.history.replaceState({ tab: activeTab, isPreview: false }, '', `#${activeTab}`);
+    }
+  };
+
+  // Browser Popstate (Back / Forward button) Handler
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Initialize initial state if empty
+    if (!window.history.state) {
+      window.history.replaceState({ tab: activeTab, isPreview: isStudentPreviewOpen }, '', `#${activeTab}`);
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      // 1. If mobile sidebar is open, close it on back
+      if (isSidebarMobileOpen) {
+        setIsSidebarMobileOpen(false);
+        return;
+      }
+
+      // 2. If quick create modal is open, close it on back
+      if (quickCreateType) {
+        setQuickCreateType(null);
+        return;
+      }
+
+      // 3. If student preview modal is open, close it on back
+      if (isStudentPreviewOpen) {
+        setIsStudentPreviewOpen(false);
+        return;
+      }
+
+      const state = event.state;
+      if (state && state.tab) {
+        setActiveTab(state.tab);
+        if (typeof state.isPreview === 'boolean') {
+          setIsStudentPreviewOpen(state.isPreview);
+        }
+      } else {
+        const hash = window.location.hash.replace('#', '');
+        const validTabs: AdminTab[] = [
+          'dashboard',
+          'subjects',
+          'topics',
+          'lectures',
+          'notes',
+          'mcqs',
+          'mocktests',
+          'users',
+          'settings',
+          'developer-access',
+          'dev-console',
+          'firebase-sync',
+        ];
+        if (hash && validTabs.includes(hash as AdminTab)) {
+          setActiveTab(hash as AdminTab);
+        } else {
+          setActiveTab('dashboard');
+        }
+        setIsStudentPreviewOpen(false);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isStudentPreviewOpen, isSidebarMobileOpen, quickCreateType, activeTab]);
 
   // Filter propagation state
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>('');
@@ -135,22 +246,22 @@ export const App: React.FC = () => {
 
   const handleQuickAction = (action: 'subject' | 'topic' | 'lecture' | 'note' | 'mcq' | 'mock') => {
     if (action === 'subject') {
-      setActiveTab('subjects');
+      navigateToTab('subjects');
       setQuickCreateType('subjects');
     } else if (action === 'topic') {
-      setActiveTab('topics');
+      navigateToTab('topics');
       setQuickCreateType('topics');
     } else if (action === 'lecture') {
-      setActiveTab('lectures');
+      navigateToTab('lectures');
       setQuickCreateType('lectures');
     } else if (action === 'note') {
-      setActiveTab('notes');
+      navigateToTab('notes');
       setQuickCreateType('notes');
     } else if (action === 'mcq') {
-      setActiveTab('mcqs');
+      navigateToTab('mcqs');
       setQuickCreateType('mcqs');
     } else if (action === 'mock') {
-      setActiveTab('mocktests');
+      navigateToTab('mocktests');
       setQuickCreateType('mocktests');
     }
   };
@@ -167,11 +278,11 @@ export const App: React.FC = () => {
     }
   };
 
-  // Auto redirect content_admin away from developer-only tabs
+  // Auto redirect content_admin away from developer-only tabs (settings is now accessible to admins)
   useEffect(() => {
-    const devOnlyTabs: AdminTab[] = ['dev-console', 'firebase-sync', 'settings'];
+    const devOnlyTabs: AdminTab[] = ['dev-console', 'firebase-sync', 'developer-access'];
     if (!isDeveloper && devOnlyTabs.includes(activeTab)) {
-      setActiveTab('dashboard');
+      navigateToTab('dashboard', false);
     }
   }, [activeTab, isDeveloper]);
 
@@ -316,7 +427,7 @@ export const App: React.FC = () => {
       {/* Top Navigation Bar */}
       <AdminNavbar
         onToggleSidebarMobile={() => setIsSidebarMobileOpen((prev) => !prev)}
-        onOpenStudentPreview={() => setIsStudentPreviewOpen(true)}
+        onOpenStudentPreview={openStudentPreviewModal}
         onQuickAction={handleQuickAction}
         appSettings={appSettings}
         searchQuery={globalSearchQuery}
@@ -339,11 +450,10 @@ export const App: React.FC = () => {
       <AdminSidebar
         currentTab={activeTab}
         onSelectTab={(tab) => {
-          setActiveTab(tab);
-          setQuickCreateType(null);
+          navigateToTab(tab);
         }}
         counts={counts}
-        onOpenStudentPreview={() => setIsStudentPreviewOpen(true)}
+        onOpenStudentPreview={openStudentPreviewModal}
         isOpenMobile={isSidebarMobileOpen}
         onCloseMobile={() => setIsSidebarMobileOpen(false)}
       />
@@ -367,8 +477,9 @@ export const App: React.FC = () => {
                     'mcqs',
                     'mocktests',
                     'users',
-                    'dev-console',
+                    'history',
                     'settings',
+                    'dev-console',
                   ] as AdminTab[])
                 : ([
                     'dashboard',
@@ -383,7 +494,7 @@ export const App: React.FC = () => {
             ).map((t) => (
               <button
                 key={t}
-                onClick={() => setActiveTab(t)}
+                onClick={() => navigateToTab(t)}
                 className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap capitalize transition ${
                   activeTab === t ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-600'
                 }`}
@@ -392,10 +503,14 @@ export const App: React.FC = () => {
                   ? 'Mock Tests'
                   : t === 'dev-console'
                   ? 'Dev Console'
+                  : t === 'history'
+                  ? 'Archive Vault'
+                  : t === 'settings'
+                  ? 'App Settings'
                   : t === 'users'
                   ? isDeveloper
                     ? 'Team & Students'
-                    : 'Student Records'
+                    : 'Student Submissions'
                   : t.replace('-', ' ')}
               </button>
             ))}
@@ -413,14 +528,37 @@ export const App: React.FC = () => {
               users={users}
               mockAttempts={mockAttempts}
               appSettings={appSettings}
-              onNavigateTab={setActiveTab}
-              onOpenStudentPreview={() => setIsStudentPreviewOpen(true)}
+              onNavigateTab={navigateToTab}
+              onOpenStudentPreview={openStudentPreviewModal}
               onQuickAction={handleQuickAction}
               onSettingsUpdated={(updated) => setAppSettings(updated)}
             />
           )}
 
-          {/* New Dedicated Developer Access Screen */}
+          {/* Master Archive Vault & Audit Trail - Strictly Developer Only */}
+          {activeTab === 'history' && (
+            isDeveloper ? (
+              <HistoryView onNavigateTab={navigateToTab} />
+            ) : (
+              <div className="p-8 rounded-3xl bg-white border border-slate-200 text-center space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+                  <Lock className="w-6 h-6" />
+                </div>
+                <h3 className="font-extrabold text-slate-900 text-base">Developer Privilege Required (डेवलपर एक्सेस आवश्यक)</h3>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  The Archive Vault, Activity Audits, and 1-Click Restoration tools are strictly restricted to Lead Developers.
+                </p>
+                <button
+                  onClick={() => navigateToTab('dashboard')}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition"
+                >
+                  Return to Dashboard
+                </button>
+              </div>
+            )
+          )}
+
+          {/* Dedicated Developer Access Screen */}
           {activeTab === 'developer-access' && (
             <DeveloperAccessView
               appSettings={appSettings}
@@ -433,7 +571,7 @@ export const App: React.FC = () => {
               users={users}
               mockAttempts={mockAttempts}
               mcqAttempts={mcqAttempts}
-              onNavigateTab={setActiveTab}
+              onNavigateTab={navigateToTab}
             />
           )}
 
@@ -443,7 +581,7 @@ export const App: React.FC = () => {
               topics={topics}
               onSelectSubjectTopics={(subId) => {
                 setSelectedSubjectFilter(subId);
-                setActiveTab('topics');
+                navigateToTab('topics');
               }}
               openCreateModal={quickCreateType === 'subjects'}
               onCloseCreateModal={() => setQuickCreateType(null)}
@@ -461,15 +599,16 @@ export const App: React.FC = () => {
               onSelectSubjectFilter={setSelectedSubjectFilter}
               openCreateModal={quickCreateType === 'topics'}
               onCloseCreateModal={() => setQuickCreateType(null)}
-              onAddContentForTopic={(type) => {
+              onAddContentForTopic={(type, topicId, subjectId) => {
+                if (subjectId) setSelectedSubjectFilter(subjectId);
                 if (type === 'lecture') {
-                  setActiveTab('lectures');
+                  navigateToTab('lectures');
                   setQuickCreateType('lectures');
                 } else if (type === 'note') {
-                  setActiveTab('notes');
+                  navigateToTab('notes');
                   setQuickCreateType('notes');
                 } else if (type === 'mcq') {
-                  setActiveTab('mcqs');
+                  navigateToTab('mcqs');
                   setQuickCreateType('mcqs');
                 }
               }}
@@ -545,7 +684,7 @@ export const App: React.FC = () => {
                   Only authorized Lead Developers can modify remote application branding, live themes, or custom codes.
                 </p>
                 <button
-                  onClick={() => setActiveTab('dashboard')}
+                  onClick={() => navigateToTab('dashboard')}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold"
                 >
                   Return to Dashboard
@@ -570,6 +709,7 @@ export const App: React.FC = () => {
             )
           )}
 
+          {/* App Settings Management (Strictly Developer Only) */}
           {activeTab === 'settings' && (
             isDeveloper ? (
               <SettingsView
@@ -581,10 +721,16 @@ export const App: React.FC = () => {
                 <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
                   <Lock className="w-6 h-6" />
                 </div>
-                <h3 className="font-extrabold text-slate-900 text-base">System Settings Locked</h3>
+                <h3 className="font-extrabold text-slate-900 text-base">Developer Privilege Required (डेवलपर एक्सेस आवश्यक)</h3>
                 <p className="text-xs text-slate-500 max-w-md mx-auto">
-                  Global app code and settings can only be managed by Lead Developers.
+                  App settings, branding, advertisement banners, and API configurations are strictly restricted to Lead Developers.
                 </p>
+                <button
+                  onClick={() => navigateToTab('dashboard')}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition"
+                >
+                  Return to Dashboard
+                </button>
               </div>
             )
           )}
@@ -594,7 +740,7 @@ export const App: React.FC = () => {
       {/* Live Student App Emulator Companion Modal */}
       <StudentAppPreviewModal
         isOpen={isStudentPreviewOpen}
-        onClose={() => setIsStudentPreviewOpen(false)}
+        onClose={closeStudentPreviewModal}
         subjects={subjects}
         topics={topics}
         lectures={lectures}

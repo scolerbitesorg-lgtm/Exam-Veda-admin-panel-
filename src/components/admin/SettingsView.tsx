@@ -84,8 +84,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     formatTimeRemaining(formData.announcementExpiresAt)
   );
 
-  const [customAnnounceVal, setCustomAnnounceVal] = useState<number>(30);
-  const [customAnnounceUnit, setCustomAnnounceUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
+  const [customAnnounceVal, setCustomAnnounceVal] = useState<string>('2');
+  const [customAnnounceUnit, setCustomAnnounceUnit] = useState<'minutes' | 'hours' | 'days' | 'months'>('minutes');
   const [showApiKeys, setShowApiKeys] = useState<{ [key: string]: boolean }>({});
 
   const toggleApiKeyVisibility = (key: string) => {
@@ -93,17 +93,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleSetCustomAnnouncementTime = () => {
-    if (!customAnnounceVal || customAnnounceVal <= 0) {
-      toast.warning('Please enter a valid time duration greater than 0.', 'Invalid Time');
+    const num = parseInt(customAnnounceVal, 10);
+    if (isNaN(num) || num <= 0) {
+      toast.warning('Please enter a valid time duration greater than 0 (e.g., 2, 3, 4 mins).', 'Invalid Time');
       return;
     }
-    const iso = calculateExpiryTimestamp(customAnnounceVal, customAnnounceUnit);
+    const iso = calculateExpiryTimestamp(num, customAnnounceUnit);
     setFormData((prev) => ({
       ...prev,
       showBanner: true,
       announcementExpiresAt: iso,
     }));
-    toast.success(`Announcement timer set for ${customAnnounceVal} ${customAnnounceUnit}!`, 'Timer Active');
+    toast.success(`Announcement / Advertising timer set for ${num} ${customAnnounceUnit}!`, 'Timer Active');
   };
 
   const handleTurnOffAnnouncement = () => {
@@ -225,10 +226,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isDeveloper) {
-      toast.error('Only Lead Developer has permission to modify core app settings.', 'Permission Denied');
-      return;
-    }
     setIsSaving(true);
     setSaveSuccess(false);
 
@@ -285,7 +282,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       await updateAppSettings(updatedFormData);
       setSaveSuccess(true);
-      toast.success('App settings & API keys synchronized with Firestore!', 'Changes Saved');
+      toast.success('App settings synchronized with Firestore (appSettings/general)!', 'Changes Saved');
       onRefreshSettings();
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
@@ -296,15 +293,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleMaintenanceToggle = async (val: boolean) => {
-    if (!isDeveloper) {
-      toast.error('Only Lead Developer has permission to toggle maintenance mode.', 'Permission Denied');
-      return;
-    }
     setFormData((prev) => ({ ...prev, maintenanceMode: val }));
     try {
       await updateAppSettings({ maintenanceMode: val });
       if (val) {
-        toast.warning('Emergency Maintenance Mode is now ACTIVE!', 'Maintenance ON');
+        toast.warning('Emergency Maintenance Mode is now ACTIVE on Firestore!', 'Maintenance ON');
       } else {
         toast.success('Maintenance Mode deactivated. App is live for students.', 'Maintenance OFF');
       }
@@ -598,88 +591,142 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* App Name */}
           <div>
-            <label className="block font-bold text-slate-700 mb-1">Application Name</label>
+            <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+              <span>Application Name (ऐप का नाम)</span>
+              <span className="text-[10px] text-indigo-600 font-semibold">Live in Student App</span>
+            </label>
             <input
               type="text"
+              required
               value={formData.appName}
               onChange={(e) => setFormData({ ...formData, appName: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-indigo-500 font-semibold"
+              placeholder="e.g. Edu Veda Learning Hub"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-indigo-500 font-semibold bg-white"
             />
           </div>
 
           {/* Tagline */}
           <div>
-            <label className="block font-bold text-slate-700 mb-1">Brand Tagline</label>
+            <label className="block font-bold text-slate-700 mb-1">Brand Tagline (टैगलाइन / उप-शीर्षक)</label>
             <input
               type="text"
               value={formData.tagline}
               onChange={(e) => setFormData({ ...formData, tagline: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-indigo-500"
+              placeholder="e.g. भारत का अग्रणी डिजिटल शिक्षा मंच"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-indigo-500 bg-white"
             />
           </div>
 
           {/* Support Email */}
           <div>
             <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Mail className="w-3.5 h-3.5 text-slate-400" />
-              <span>Official Support Email</span>
+              <Mail className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Official Support Email (सपोर्ट ईमेल)</span>
             </label>
             <input
               type="email"
+              required
               value={formData.supportEmail}
               onChange={(e) => setFormData({ ...formData, supportEmail: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-indigo-500 font-mono"
+              placeholder="support@eduveda.in"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-indigo-500 font-mono bg-white"
             />
           </div>
 
           {/* Support Phone */}
           <div>
             <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Phone className="w-3.5 h-3.5 text-slate-400" />
-              <span>Helpline / WhatsApp Contact</span>
+              <Phone className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Helpline / WhatsApp Contact (हेल्पलाइन / व्हाट्सएप)</span>
             </label>
             <input
               type="text"
+              required
               value={formData.supportPhone}
               onChange={(e) => setFormData({ ...formData, supportPhone: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-indigo-500 font-mono"
+              placeholder="+91 98765 43210"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-indigo-500 font-mono bg-white"
             />
           </div>
 
-          {/* Theme Color */}
-          <div>
-            <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Palette className="w-3.5 h-3.5 text-slate-400" />
-              <span>Primary Brand Accent Color</span>
+          {/* Theme Color with Swatches */}
+          <div className="space-y-1.5">
+            <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Palette className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Primary Theme Color (थीम कलर)</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">{formData.themeColor}</span>
             </label>
             <div className="flex items-center gap-2">
               <input
                 type="color"
                 value={formData.themeColor}
                 onChange={(e) => setFormData({ ...formData, themeColor: e.target.value })}
-                className="w-10 h-9 p-0.5 rounded-xl border border-slate-300 cursor-pointer"
+                className="w-10 h-9 p-0.5 rounded-xl border border-slate-300 cursor-pointer shrink-0"
               />
               <input
                 type="text"
                 value={formData.themeColor}
                 onChange={(e) => setFormData({ ...formData, themeColor: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono text-xs"
+                placeholder="#4f46e5"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono text-xs bg-white uppercase"
               />
+            </div>
+            {/* Quick Color Presets */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              {[
+                { name: 'Indigo', color: '#4f46e5' },
+                { name: 'Emerald', color: '#059669' },
+                { name: 'Violet', color: '#7c3aed' },
+                { name: 'Blue', color: '#2563eb' },
+                { name: 'Amber', color: '#d97706' },
+                { name: 'Rose', color: '#e11d48' },
+                { name: 'Cyan', color: '#0891b2' },
+                { name: 'Dark Slate', color: '#0f172a' },
+              ].map((swatch) => (
+                <button
+                  key={swatch.color}
+                  type="button"
+                  onClick={() => setFormData({ ...formData, themeColor: swatch.color })}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-bold transition cursor-pointer ${
+                    formData.themeColor.toLowerCase() === swatch.color.toLowerCase()
+                      ? 'border-slate-800 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full border border-black/10 shrink-0"
+                    style={{ backgroundColor: swatch.color }}
+                  />
+                  <span>{swatch.name}</span>
+                </button>
+              ))}
             </div>
           </div>
 
           {/* App Version */}
           <div>
-            <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1.5">
-              <Shield className="w-3.5 h-3.5 text-slate-400" />
-              <span>Release Version Code</span>
+            <label className="block font-bold text-slate-700 mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                <span>App Release Version (ऐप वर्ज़न कोड)</span>
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">
+                v{formData.version || '2.4.0'}
+              </span>
             </label>
             <input
               type="text"
+              required
               value={formData.version}
               onChange={(e) => setFormData({ ...formData, version: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-xs"
+              placeholder="2.4.0"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-xs bg-white"
             />
+            <p className="text-[10px] text-slate-400 mt-1">
+              Displayed in student app footer and used for version synchronization.
+            </p>
           </div>
         </div>
 
@@ -745,6 +792,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  const iso = calculateExpiryTimestamp(2, 'minutes');
+                  setFormData((prev) => ({ ...prev, showBanner: true, announcementExpiresAt: iso }));
+                  toast.success('⚡ Live banner timer set for 2 minutes!', 'Timer Set');
+                }}
+                className="px-2.5 py-1 rounded-lg bg-white hover:bg-amber-100 text-amber-900 font-bold border border-amber-300 text-[11px] cursor-pointer shadow-2xs"
+              >
+                +2 Mins (2 मिनट)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const iso = calculateExpiryTimestamp(3, 'minutes');
+                  setFormData((prev) => ({ ...prev, showBanner: true, announcementExpiresAt: iso }));
+                  toast.success('⚡ Live banner timer set for 3 minutes!', 'Timer Set');
+                }}
+                className="px-2.5 py-1 rounded-lg bg-white hover:bg-amber-100 text-amber-900 font-bold border border-amber-300 text-[11px] cursor-pointer shadow-2xs"
+              >
+                +3 Mins (3 मिनट)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const iso = calculateExpiryTimestamp(5, 'minutes');
+                  setFormData((prev) => ({ ...prev, showBanner: true, announcementExpiresAt: iso }));
+                  toast.success('⚡ Live banner timer set for 5 minutes!', 'Timer Set');
+                }}
+                className="px-2.5 py-1 rounded-lg bg-white hover:bg-amber-100 text-amber-900 font-bold border border-amber-300 text-[11px] cursor-pointer shadow-2xs"
+              >
+                +5 Mins
+              </button>
+              <button
+                type="button"
+                onClick={() => {
                   const iso = calculateExpiryTimestamp(15, 'minutes');
                   setFormData((prev) => ({ ...prev, showBanner: true, announcementExpiresAt: iso }));
                   toast.success('Announcement set for 15 minutes!', 'Timer Set');
@@ -799,37 +879,79 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
 
           {/* Custom Duration Builder */}
-          <div className="p-3 bg-white/80 rounded-xl border border-amber-200 space-y-2">
-            <span className="text-[11px] font-extrabold text-amber-950 flex items-center gap-1.5">
-              <Timer className="w-3.5 h-3.5 text-amber-700" />
-              <span>Custom Duration (अपनी पसंद का कस्टम समय जोड़ें):</span>
-            </span>
+          <div className="p-3 bg-white/90 rounded-xl border border-amber-200 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold text-amber-950 flex items-center gap-1.5">
+                <Timer className="w-3.5 h-3.5 text-amber-700" />
+                <span>Custom Duration (अपनी पसंद का कस्टम विज्ञापन / सूचना समय जोड़ें):</span>
+              </span>
+              {/* Quick minute shortcuts */}
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-slate-500 font-medium">Quick:</span>
+                {[
+                  { label: '2m', val: '2', unit: 'minutes' as const },
+                  { label: '3m', val: '3', unit: 'minutes' as const },
+                  { label: '4m', val: '4', unit: 'minutes' as const },
+                  { label: '5m', val: '5', unit: 'minutes' as const },
+                  { label: '10m', val: '10', unit: 'minutes' as const },
+                  { label: '30m', val: '30', unit: 'minutes' as const },
+                ].map((chip) => (
+                  <button
+                    key={chip.label}
+                    type="button"
+                    onClick={() => {
+                      setCustomAnnounceVal(chip.val);
+                      setCustomAnnounceUnit(chip.unit);
+                    }}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer transition ${
+                      customAnnounceVal === chip.val && customAnnounceUnit === chip.unit
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-amber-100/80 text-amber-900 hover:bg-amber-200'
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div className="flex flex-wrap items-center gap-2">
               <input
-                type="number"
-                min="1"
-                max="999"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="e.g. 2, 3, 4"
                 value={customAnnounceVal}
-                onChange={(e) => setCustomAnnounceVal(parseInt(e.target.value) || 1)}
-                className="w-20 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-center"
+                onChange={(e) => {
+                  const cleaned = e.target.value.replace(/[^0-9]/g, '');
+                  setCustomAnnounceVal(cleaned);
+                }}
+                className="w-24 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-center bg-white focus:border-amber-500 focus:outline-none"
               />
               <select
                 value={customAnnounceUnit}
                 onChange={(e) => setCustomAnnounceUnit(e.target.value as any)}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white"
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white focus:border-amber-500 focus:outline-none"
               >
                 <option value="minutes">Minutes (मिनट)</option>
                 <option value="hours">Hours (घंटे)</option>
                 <option value="days">Days (दिन)</option>
+                <option value="months">Months (महीने)</option>
               </select>
+
               <button
                 type="button"
                 onClick={handleSetCustomAnnouncementTime}
-                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs cursor-pointer transition shadow-2xs"
+                className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs cursor-pointer transition shadow-2xs"
               >
-                Apply Custom Timer (कस्टम समय सेट करें)
+                Apply Custom Timer ({customAnnounceVal ? customAnnounceVal : '...'} {customAnnounceUnit} सेट करें)
               </button>
+
+              {customAnnounceVal && parseInt(customAnnounceVal, 10) > 0 && (
+                <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
+                  Preview Expiry: {new Date(Date.now() + (parseInt(customAnnounceVal, 10) || 1) * (customAnnounceUnit === 'minutes' ? 60000 : customAnnounceUnit === 'hours' ? 3600000 : customAnnounceUnit === 'days' ? 86400000 : 2592000000)).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
             </div>
 
             {/* Exact Date & Time Picker */}

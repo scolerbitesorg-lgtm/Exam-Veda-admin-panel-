@@ -23,6 +23,8 @@ import {
   Lock,
   Zap,
   Terminal,
+  History,
+  Archive,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { DatabaseLiveBadge } from '../common/DatabaseLiveBadge';
@@ -81,6 +83,18 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
     isNew?: boolean;
   }[] = [
     {
+      id: 'history',
+      label: 'Archive & Audit Vault',
+      hindiLabel: 'आर्काइव वॉल्ट व रीस्टोर इतिहास',
+      icon: Archive,
+    },
+    {
+      id: 'settings',
+      label: 'App Settings & Ads',
+      hindiLabel: 'ऐप सेटिंग्स, विज्ञापन व ब्रांडिंग',
+      icon: Settings,
+    },
+    {
       id: 'developer-access',
       label: 'Developer Access',
       hindiLabel: 'एडवांस्ड डेवलपर टूल्स एवं न्यू फीचर्स',
@@ -88,7 +102,6 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       isNew: true,
     },
     { id: 'dev-console', label: 'Developer Remote Console', hindiLabel: 'यूजर ऐप थीम व कोड इंजेक्टर', icon: Code2 },
-    { id: 'settings', label: 'Global App Settings', hindiLabel: 'सिस्टम सेटिंग्स', icon: Settings },
   ];
 
   return (

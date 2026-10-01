@@ -18,6 +18,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
+import { logLogin, logActivity } from '../services/historyService';
 import type { UserProfile, UserRole } from '../types';
 
 // ============================================================================
@@ -326,11 +327,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             uid: staffDoc.uid || staffDocId,
             role: computedRole,
           });
+
+          // Log successful login
+          logLogin({
+            userId: staffDoc.uid || staffDocId,
+            userEmail: cleanEmail,
+            userName: staffDoc.name,
+            userRole: computedRole,
+            status: 'success',
+            authMethod: 'database_credentials',
+          }).catch(() => {});
+
           return;
         }
       }
     } catch (dbErr: any) {
       if (dbErr.message && (dbErr.message.includes('गलत पासवर्ड') || dbErr.message.includes('अमान्य क्रेडेंशियल्स') || dbErr.message.includes('Temporary Access Expired'))) {
+        logLogin({
+          userId: 'failed_attempt',
+          userEmail: cleanEmail,
+          userName: 'Attempted User',
+          userRole: 'user',
+          status: 'failed',
+          authMethod: 'database_credentials',
+          failureReason: dbErr.message,
+        }).catch(() => {});
         throw dbErr;
       }
       console.warn('Firestore password check notice:', dbErr);
@@ -364,6 +385,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const expMsg =
               '🚫 अमान्य क्रेडेंशियल्स (Temporary Access Expired): इस अस्थायी अकाउंट की निर्धारित समय सीमा समाप्त हो चुकी है। अब यह ईमेल और पासवर्ड लॉगिन के लिए अमान्य (Invalid) है।';
             setError(expMsg);
+            logLogin({
+              userId: authRes.user.uid,
+              userEmail: cleanEmail,
+              userName: authRes.user.displayName || 'Expired User',
+              userRole: 'user',
+              status: 'failed',
+              authMethod: 'firebase_auth',
+              failureReason: 'Access Expired',
+            }).catch(() => {});
             throw new Error(expMsg);
           }
         }
@@ -372,6 +402,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       setCurrentUser(authRes.user);
+      logLogin({
+        userId: authRes.user.uid,
+        userEmail: cleanEmail,
+        userName: authRes.user.displayName || 'Edu Veda User',
+        userRole: deriveRole(cleanEmail),
+        status: 'success',
+        authMethod: 'firebase_auth',
+      }).catch(() => {});
       return;
     } catch (authErr: any) {
       if (authErr.message && authErr.message.includes('अस्थायी एक्सेस')) {
@@ -413,6 +451,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await setDoc(doc(db, 'users', res.user.uid), p);
           setCurrentUser(res.user);
           setUserProfile(p);
+          logLogin({
+            userId: res.user.uid,
+            userEmail: preset.email,
+            userName: preset.name,
+            userRole: preset.role,
+            status: 'success',
+            authMethod: 'developer_preset',
+          }).catch(() => {});
           return;
         } catch (innerCreateErr) {
           const isDev =
@@ -438,6 +484,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
           setCurrentUser({ uid: p.uid, email: p.email, displayName: p.name });
           setUserProfile(p);
+          logLogin({
+            userId: p.uid,
+            userEmail: preset.email,
+            userName: preset.name,
+            userRole: preset.role,
+            status: 'success',
+            authMethod: 'developer_preset',
+          }).catch(() => {});
           return;
         }
       }
@@ -447,6 +501,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         msg = 'गलत पासवर्ड (Incorrect Password)। कृपया सही पासवर्ड दर्ज करें।';
       }
       setError(msg);
+      logLogin({
+        userId: 'failed_attempt',
+        userEmail: cleanEmail,
+        userName: 'Unauthorized',
+        userRole: 'user',
+        status: 'failed',
+        authMethod: 'password',
+        failureReason: msg,
+      }).catch(() => {});
       throw new Error(msg);
     }
   };
@@ -485,6 +548,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Save directly to Firestore users collection
       await setDoc(doc(db, 'users', sanitizedDocId), newStaffDoc);
+
+      // Audit log activity
+      logActivity({
+        entityType: isTemporary ? 'role' : 'user',
+        entityId: sanitizedDocId,
+        entityTitle: `${name} (${cleanEmail})`,
+        action: isTemporary ? 'role_change' : 'create',
+        summary: isTemporary
+          ? `Granted temporary ${role} access to ${name} for ${durationMinutes || 60} minutes.`
+          : `Created new team member ${name} with role "${role}".`,
+        details: `Assigned role: ${role}. Expiry: ${roleExpiresAt || 'Permanent'}`,
+        newData: newStaffDoc,
+        canRestore: true,
+        tags: ['Team', 'User', role, isTemporary ? 'Temporary' : 'Permanent'],
+      }).catch(() => {});
     } catch (err: any) {
       console.warn('Create staff member error:', err);
       setError(err.message || 'Failed to appoint staff member.');
@@ -516,6 +594,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
         }
+
+        logActivity({
+          entityType: 'user',
+          entityId: uid,
+          entityTitle: udata.name || 'Staff Member',
+          action: 'update',
+          summary: `Updated login credentials / password for staff member ${udata.name || uid}.`,
+          tags: ['Security', 'Password', 'User'],
+        }).catch(() => {});
       }
     } catch (err: any) {
       throw new Error('Failed to update password: ' + err.message);

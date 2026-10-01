@@ -267,7 +267,60 @@ export async function updateSubject(id: string, updates: Partial<Subject>): Prom
   }));
 }
 
+// ================= ARCHIVE SNAPSHOT ON DELETION HELPER =================
+async function saveDeletionToArchive(collectionName: string, entityType: string, id: string): Promise<void> {
+  try {
+    const snap = await getDoc(doc(db, collectionName, id));
+    if (snap.exists()) {
+      const data = snap.data();
+      const title =
+        data.name ||
+        data.hindiName ||
+        data.title ||
+        data.hindiTitle ||
+        data.question ||
+        data.hindiQuestion ||
+        id;
+      const actId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const actorEmail = auth?.currentUser?.email || 'admin@eduveda.in';
+      const actorName = auth?.currentUser?.displayName || (actorEmail.includes('dev') ? 'Developer' : 'Admin');
+      const actorRole = actorEmail.includes('dev') ? 'developer' : 'content_admin';
+
+      const fullRecord = {
+        id: actId,
+        entityType,
+        entityId: id,
+        entityTitle: String(title),
+        action: 'delete',
+        actorEmail,
+        actorName,
+        actorRole,
+        timestamp: new Date().toISOString(),
+        summary: `Deleted "${title}". Safely preserved in Archive Vault for 1-click re-addition.`,
+        details: `Deleted from collection "${collectionName}" by ${actorName}`,
+        previousData: data,
+        canRestore: true,
+        isRestored: false,
+        tags: ['Archive', 'Deleted', entityType],
+      };
+
+      await setDoc(doc(db, 'activityHistory', actId), cleanDocData(fullRecord)).catch(() => {});
+      try {
+        const cachedStr = localStorage.getItem('eduveda_activity_history_cache');
+        const existing = cachedStr ? JSON.parse(cachedStr) : [];
+        localStorage.setItem(
+          'eduveda_activity_history_cache',
+          JSON.stringify([fullRecord, ...existing.filter((e: any) => e.id !== actId)].slice(0, 300))
+        );
+      } catch {}
+    }
+  } catch (err) {
+    console.warn('Archive snapshot error:', err);
+  }
+}
+
 export async function deleteSubject(id: string): Promise<void> {
+  await saveDeletionToArchive('subjects', 'subject', id);
   await deleteDoc(doc(db, 'subjects', id));
 }
 
@@ -339,6 +392,7 @@ export async function updateTopic(id: string, updates: Partial<Topic>): Promise<
 }
 
 export async function deleteTopic(id: string): Promise<void> {
+  await saveDeletionToArchive('topics', 'topic', id);
   await deleteDoc(doc(db, 'topics', id));
 }
 
@@ -410,6 +464,7 @@ export async function updateLecture(id: string, updates: Partial<Lecture>): Prom
 }
 
 export async function deleteLecture(id: string): Promise<void> {
+  await saveDeletionToArchive('lectures', 'lecture', id);
   await deleteDoc(doc(db, 'lectures', id));
 }
 
@@ -481,6 +536,7 @@ export async function updateNote(id: string, updates: Partial<Note>): Promise<vo
 }
 
 export async function deleteNote(id: string): Promise<void> {
+  await saveDeletionToArchive('notes', 'note', id);
   await deleteDoc(doc(db, 'notes', id));
 }
 
@@ -593,6 +649,7 @@ export async function updateMCQ(id: string, updates: Partial<MCQ>): Promise<void
 }
 
 export async function deleteMCQ(id: string): Promise<void> {
+  await saveDeletionToArchive('mcqs', 'mcq', id);
   await deleteDoc(doc(db, 'mcqs', id));
 }
 
@@ -642,6 +699,7 @@ export async function updateMockTest(id: string, updates: Partial<MockTest>): Pr
 }
 
 export async function deleteMockTest(id: string): Promise<void> {
+  await saveDeletionToArchive('mockTests', 'mockTest', id);
   await deleteDoc(doc(db, 'mockTests', id));
 }
 
