@@ -540,6 +540,27 @@ export async function deleteNote(id: string): Promise<void> {
   await deleteDoc(doc(db, 'notes', id));
 }
 
+export async function deleteNotesByTopic(topicId: string): Promise<{ deletedCount: number }> {
+  if (!topicId) return { deletedCount: 0 };
+  const q = query(collection(db, 'notes'), where('topicId', '==', topicId));
+  const snap = await getDocs(q);
+  if (snap.empty) return { deletedCount: 0 };
+  const docs = snap.docs;
+  const chunkSize = 400;
+  let totalDeleted = 0;
+  for (let i = 0; i < docs.length; i += chunkSize) {
+    const chunk = docs.slice(i, i + chunkSize);
+    const batch = writeBatch(db);
+    for (const d of chunk) {
+      await saveDeletionToArchive('notes', 'note', d.id);
+      batch.delete(d.ref);
+    }
+    await batch.commit();
+    totalDeleted += chunk.length;
+  }
+  return { deletedCount: totalDeleted };
+}
+
 export async function deleteAllNotes(): Promise<{ deletedCount: number }> {
   const snap = await getDocs(collection(db, 'notes'));
   if (snap.empty) return { deletedCount: 0 };
@@ -653,6 +674,27 @@ export async function deleteMCQ(id: string): Promise<void> {
   await deleteDoc(doc(db, 'mcqs', id));
 }
 
+export async function deleteMCQsByTopic(topicId: string): Promise<{ deletedCount: number }> {
+  if (!topicId) return { deletedCount: 0 };
+  const q = query(collection(db, 'mcqs'), where('topicId', '==', topicId));
+  const snap = await getDocs(q);
+  if (snap.empty) return { deletedCount: 0 };
+  const docs = snap.docs;
+  const chunkSize = 400;
+  let totalDeleted = 0;
+  for (let i = 0; i < docs.length; i += chunkSize) {
+    const chunk = docs.slice(i, i + chunkSize);
+    const batch = writeBatch(db);
+    for (const d of chunk) {
+      await saveDeletionToArchive('mcqs', 'mcq', d.id);
+      batch.delete(d.ref);
+    }
+    await batch.commit();
+    totalDeleted += chunk.length;
+  }
+  return { deletedCount: totalDeleted };
+}
+
 // ================= MOCK TESTS =================
 export async function getMockTests(): Promise<MockTest[]> {
   try {
@@ -701,6 +743,27 @@ export async function updateMockTest(id: string, updates: Partial<MockTest>): Pr
 export async function deleteMockTest(id: string): Promise<void> {
   await saveDeletionToArchive('mockTests', 'mockTest', id);
   await deleteDoc(doc(db, 'mockTests', id));
+}
+
+export async function deleteMockTestsBySubject(subjectId: string): Promise<{ deletedCount: number }> {
+  if (!subjectId) return { deletedCount: 0 };
+  const q = query(collection(db, 'mockTests'), where('subjectId', '==', subjectId));
+  const snap = await getDocs(q);
+  if (snap.empty) return { deletedCount: 0 };
+  const docs = snap.docs;
+  const chunkSize = 400;
+  let totalDeleted = 0;
+  for (let i = 0; i < docs.length; i += chunkSize) {
+    const chunk = docs.slice(i, i + chunkSize);
+    const batch = writeBatch(db);
+    for (const d of chunk) {
+      await saveDeletionToArchive('mockTests', 'mockTest', d.id);
+      batch.delete(d.ref);
+    }
+    await batch.commit();
+    totalDeleted += chunk.length;
+  }
+  return { deletedCount: totalDeleted };
 }
 
 export async function deleteAllMockTests(): Promise<{ deletedCount: number }> {

@@ -27,7 +27,7 @@ import {
   Check,
   Palette,
 } from 'lucide-react';
-import { addMCQ, updateMCQ, deleteMCQ, deleteAllMCQs } from '../../services/dbService';
+import { addMCQ, updateMCQ, deleteMCQ, deleteMCQsByTopic, deleteAllMCQs } from '../../services/dbService';
 import { BulkImportMCQModal } from './BulkImportMCQModal';
 import { MCQAutoImporterModal } from './MCQAutoImporterModal';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
@@ -108,6 +108,7 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
   const [shift, setShift] = useState('');
   const [published, setPublished] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deleteOldInTopicBeforeAdd, setDeleteOldInTopicBeforeAdd] = useState(false);
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -115,6 +116,11 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
 
   // Fast set of valid topic IDs
   const validTopicIdsSet = useMemo(() => new Set(topics.map((t) => t.id)), [topics]);
+
+  // Existing MCQs count in currently selected topic in modal
+  const existingMCQsInSelectedTopic = useMemo(() => {
+    return mcqs.filter((m) => m.topicId === selectedTopicId);
+  }, [mcqs, selectedTopicId]);
 
   // Pre-calculate per-topic counts in a single O(N) pass
   const topicStatsMap = useMemo(() => {
@@ -210,6 +216,7 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
 
   const openAddModal = (targetTopicId?: string) => {
     setEditingMCQ(null);
+    setDeleteOldInTopicBeforeAdd(false);
     const chosenTopicId = targetTopicId || selectedFolderTopicId || defaultTopicId || topics[0]?.id || '';
     const chosenTopic = topics.find((t) => t.id === chosenTopicId);
     const subId = chosenTopic?.subjectId || filterSubjectId || subjects[0]?.id || '';
@@ -231,6 +238,7 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
 
   const openEditModal = (m: MCQ) => {
     setEditingMCQ(m);
+    setDeleteOldInTopicBeforeAdd(false);
     setSelectedSubjectId(m.subjectId);
     setSelectedTopicId(m.topicId);
     setQuestion(m.question);
@@ -254,6 +262,7 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
   const handleClose = () => {
     setIsModalOpen(false);
     setEditingMCQ(null);
+    setDeleteOldInTopicBeforeAdd(false);
     if (onCloseCreateModal) onCloseCreateModal();
   };
 
@@ -281,6 +290,10 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
 
     setIsSubmitting(true);
     try {
+      if (deleteOldInTopicBeforeAdd && selectedTopicId) {
+        await deleteMCQsByTopic(selectedTopicId);
+      }
+
       if (editingMCQ) {
         await updateMCQ(editingMCQ.id, {
           subjectId: selectedSubjectId,
@@ -321,6 +334,38 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
       handleClose();
     } catch (err: any) {
       alert('Error saving MCQ: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteFromModal = async () => {
+    if (!editingMCQ) return;
+    if (!window.confirm('क्या आप इस प्रश्न को डिलीट करना चाहते हैं?')) return;
+    setIsSubmitting(true);
+    try {
+      await deleteMCQ(editingMCQ.id);
+      setDeleteSuccess('MCQ question deleted successfully.');
+      setTimeout(() => setDeleteSuccess(null), 3500);
+      handleClose();
+    } catch (err: any) {
+      alert('Failed to delete MCQ: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleQuickPurgeTopicMCQs = async () => {
+    if (!selectedTopicId) return;
+    const targetTopic = topics.find((t) => t.id === selectedTopicId);
+    if (!window.confirm(`क्या आप टॉपिक "${targetTopic?.title || 'Selected Topic'}" के सभी ${existingMCQsInSelectedTopic.length} पुराने MCQs हटाना चाहते हैं?`)) return;
+    setIsSubmitting(true);
+    try {
+      const res = await deleteMCQsByTopic(selectedTopicId);
+      setDeleteSuccess(`टॉपिक के ${res.deletedCount} पुराने MCQs हटा दिए गए।`);
+      setTimeout(() => setDeleteSuccess(null), 4000);
+    } catch (err: any) {
+      alert('MCQs हटाने में त्रुटि: ' + err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -1015,235 +1060,295 @@ export const MCQsView: React.FC<MCQsViewProps> = ({
 
       {/* Add / Edit MCQ Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-          <div className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 my-8 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 sticky top-0 bg-white z-20">
-              <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div className="w-full max-w-2xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 flex flex-col max-h-[92vh] sm:max-h-[90vh] my-auto overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Sticky Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white z-10 sticky top-0">
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
                 <HelpCircle className="w-5 h-5 text-indigo-600" />
-                {editingMCQ ? 'Edit Question (प्रश्न संपादित करें)' : 'Create MCQ (नया प्रश्न जोड़ें)'}
+                <span>{editingMCQ ? 'Edit Question (प्रश्न संपादित करें)' : 'Create MCQ (नया प्रश्न जोड़ें)'}</span>
               </h2>
               <button
+                type="button"
                 onClick={handleClose}
-                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer"
+                title="Close modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs">
-              {/* Subject & Topic Selectors */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Subject (विषय) *</label>
-                  <select
-                    value={selectedSubjectId}
-                    onChange={(e) => {
-                      const subId = e.target.value;
-                      setSelectedSubjectId(subId);
-                      const avail = topics.filter((t) => t.subjectId === subId);
-                      setSelectedTopicId(avail[0]?.id || '');
-                    }}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
-                  >
-                    {subjects.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.icon || '📚'} {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Topic Folder (टॉपिक) *</label>
-                  <select
-                    value={selectedTopicId}
-                    onChange={(e) => setSelectedTopicId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
-                  >
-                    {availableTopics.length === 0 ? (
-                      <option value="">No topics in this subject</option>
-                    ) : (
-                      availableTopics.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.title || (t as any).name} {(t.hindiTitle || (t as any).hindiName) ? `(${(t.hindiTitle || (t as any).hindiName)})` : ''}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              {/* Question English & Hindi */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Question Statement (English) *</label>
-                <textarea
-                  rows={2}
-                  required
-                  placeholder="e.g. Which Constitutional Amendment lowered voting age from 21 to 18 years?"
-                  value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs font-semibold"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Question in Hindi (हिंदी प्रश्न)</label>
-                <textarea
-                  rows={2}
-                  placeholder="e.g. किस संविधान संशोधन द्वारा मतदान की आयु 21 से घटाकर 18 वर्ष की गई?"
-                  value={hindiQuestion}
-                  onChange={(e) => setHindiQuestion(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
-                />
-              </div>
-
-              {/* Options & Correct Answer Selector */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    Four Options & Mark Correct Answer
-                  </span>
-                  <span className="text-[10px] text-slate-500">Radio select the right answer</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {options.map((opt, idx) => {
-                    const label = String.fromCharCode(65 + idx);
-                    const isSelected = correctAnswer === idx;
-                    return (
-                      <div
-                        key={idx}
-                        className={`p-2 rounded-xl border flex items-center gap-2 bg-white transition ${
-                          isSelected ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-300'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="correctOpt"
-                          checked={isSelected}
-                          onChange={() => setCorrectAnswer(idx)}
-                          className="w-4 h-4 text-emerald-600 cursor-pointer"
-                        />
-                        <span className="font-bold text-slate-600 w-4">{label}:</span>
-                        <input
-                          type="text"
-                          required
-                          value={opt}
-                          onChange={(e) => handleOptionChange(idx, e.target.value)}
-                          placeholder={`Option ${label}`}
-                          className="flex-1 px-2 py-1 rounded-lg border-0 focus:ring-0 text-xs"
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Exam Reference & Date (Optional) */}
-              <div className="p-3.5 rounded-2xl bg-indigo-50/50 border border-indigo-100/80 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-indigo-950 flex items-center gap-1.5 text-xs">
-                    <Award className="w-3.5 h-3.5 text-indigo-600" />
-                    Exam Reference & Date (परीक्षा विवरण - Optional)
-                  </span>
-                  <span className="text-[10px] text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md font-semibold">
-                    वैकल्पिक (Optional)
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <div className="sm:col-span-2">
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Exam Name & Shift (जैसे SSC CGL Mains 2018 / CHSL 2023)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. SSC CGL Mains 2018 / UPSC Prelims 2021"
-                      value={examTag}
-                      onChange={(e) => setExamTag(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
-                    />
-                  </div>
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+                {/* Subject & Topic Selectors */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Exam Date / Year (दिनांक या वर्ष)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. 15-10-2018 / 2023"
-                      value={examDate}
-                      onChange={(e) => setExamDate(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
-                    />
+                    <label className="block font-bold text-slate-700 mb-1">Subject (विषय) *</label>
+                    <select
+                      value={selectedSubjectId}
+                      onChange={(e) => {
+                        const subId = e.target.value;
+                        setSelectedSubjectId(subId);
+                        const avail = topics.filter((t) => t.subjectId === subId);
+                        setSelectedTopicId(avail[0]?.id || '');
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs bg-white"
+                    >
+                      {subjects.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.icon || '📚'} {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Topic Folder (टॉपिक) *</label>
+                    <select
+                      value={selectedTopicId}
+                      onChange={(e) => setSelectedTopicId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs bg-white"
+                    >
+                      {availableTopics.length === 0 ? (
+                        <option value="">No topics in this subject</option>
+                      ) : (
+                        availableTopics.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.title || (t as any).name} {(t.hindiTitle || (t as any).hindiName) ? `(${(t.hindiTitle || (t as any).hindiName)})` : ''}
+                          </option>
+                        ))
+                      )}
+                    </select>
                   </div>
                 </div>
-                <p className="text-[10px] text-slate-500 italic">
-                  💡 टिप: आप प्रश्न टेक्स्ट में भी [CGL mains 2018] या (ex- chsl 2023) लिख सकते हैं, सिस्टम इसे अपने आप पहचान लेगा।
-                </p>
-              </div>
 
-              {/* Explanation & Difficulty */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Detailed Explanation (व्याख्या) *</label>
+                {/* Purge / Delete Existing MCQs Option */}
+                <div className="p-3 rounded-2xl bg-rose-50/80 border border-rose-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <label className="flex items-start sm:items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={deleteOldInTopicBeforeAdd}
+                      onChange={(e) => setDeleteOldInTopicBeforeAdd(e.target.checked)}
+                      className="w-4 h-4 mt-0.5 sm:mt-0 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+                    />
+                    <div>
+                      <span className="font-extrabold text-rose-900 block text-xs">
+                        पुराने प्रश्न डिलीट करके नया जोड़ें (Replace / Delete Old MCQs)
+                      </span>
+                      <span className="text-[11px] text-rose-700 block">
+                        {existingMCQsInSelectedTopic.length > 0
+                          ? `इस टॉपिक के ${existingMCQsInSelectedTopic.length} पुराने प्रश्न सेव होने पर हटा दिए जाएंगे।`
+                          : 'इस टॉपिक में अभी कोई पुराना प्रश्न नहीं है।'}
+                      </span>
+                    </div>
+                  </label>
+
+                  {existingMCQsInSelectedTopic.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleQuickPurgeTopicMCQs}
+                      disabled={isSubmitting}
+                      className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-[11px] flex items-center justify-center gap-1 transition shadow-2xs cursor-pointer active:scale-95 disabled:opacity-50 shrink-0"
+                      title="इस टॉपिक के सभी पुराने प्रश्न अभी डिलीट करें"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Purge ({existingMCQsInSelectedTopic.length})</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Question English & Hindi */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Question Statement (English) *</label>
                   <textarea
                     rows={2}
                     required
-                    placeholder="Provide concept breakdown and context for students..."
-                    value={explanation}
-                    onChange={(e) => setExplanation(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
+                    placeholder="e.g. Which Constitutional Amendment lowered voting age from 21 to 18 years?"
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs font-semibold"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Difficulty Level</label>
-                  <select
-                    value={difficulty}
-                    onChange={(e) => setDifficulty(e.target.value as any)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
-                  >
-                    <option value="easy">Easy (सरल)</option>
-                    <option value="medium">Medium (मध्यम)</option>
-                    <option value="hard">Hard (कठिन)</option>
-                  </select>
+                  <label className="block font-bold text-slate-700 mb-1">Question in Hindi (हिंदी प्रश्न)</label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. किस संविधान संशोधन द्वारा मतदान की आयु 21 से घटाकर 18 वर्ष की गई?"
+                    value={hindiQuestion}
+                    onChange={(e) => setHindiQuestion(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs"
+                  />
+                </div>
+
+                {/* Options & Correct Answer Selector */}
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Four Options & Mark Correct Answer
+                    </span>
+                    <span className="text-[10px] text-slate-500">Radio select the right answer</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {options.map((opt, idx) => {
+                      const label = String.fromCharCode(65 + idx);
+                      const isSelected = correctAnswer === idx;
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-2 rounded-xl border flex items-center gap-2 bg-white transition ${
+                            isSelected ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-300'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="correctOpt"
+                            checked={isSelected}
+                            onChange={() => setCorrectAnswer(idx)}
+                            className="w-4 h-4 text-emerald-600 cursor-pointer"
+                          />
+                          <span className="font-bold text-slate-600 w-4">{label}:</span>
+                          <input
+                            type="text"
+                            required
+                            value={opt}
+                            onChange={(e) => handleOptionChange(idx, e.target.value)}
+                            placeholder={`Option ${label}`}
+                            className="flex-1 px-2 py-1 rounded-lg border-0 focus:ring-0 text-xs"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Exam Reference & Date (Optional) */}
+                <div className="p-3.5 rounded-2xl bg-indigo-50/50 border border-indigo-100/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-indigo-950 flex items-center gap-1.5 text-xs">
+                      <Award className="w-3.5 h-3.5 text-indigo-600" />
+                      Exam Reference & Date (परीक्षा विवरण - Optional)
+                    </span>
+                    <span className="text-[10px] text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md font-semibold">
+                      वैकल्पिक (Optional)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Exam Name & Shift (जैसे SSC CGL Mains 2018 / CHSL 2023)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. SSC CGL Mains 2018 / UPSC Prelims 2021"
+                        value={examTag}
+                        onChange={(e) => setExamTag(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Exam Date / Year (दिनांक या वर्ष)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 15-10-2018 / 2023"
+                        value={examDate}
+                        onChange={(e) => setExamDate(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs bg-white"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500 italic">
+                    💡 टिप: आप प्रश्न टेक्स्ट में भी [CGL mains 2018] या (ex- chsl 2023) लिख सकते हैं, सिस्टम इसे अपने आप पहचान लेगा।
+                  </p>
+                </div>
+
+                {/* Explanation & Difficulty */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-700 mb-1">Detailed Explanation (व्याख्या) *</label>
+                    <textarea
+                      rows={2}
+                      required
+                      placeholder="Provide concept breakdown and context for students..."
+                      value={explanation}
+                      onChange={(e) => setExplanation(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Difficulty Level</label>
+                    <select
+                      value={difficulty}
+                      onChange={(e) => setDifficulty(e.target.value as any)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs bg-white"
+                    >
+                      <option value="easy">Easy (सरल)</option>
+                      <option value="medium">Medium (मध्यम)</option>
+                      <option value="hard">Hard (कठिन)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Live Status Toggle */}
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-slate-800">Publish to Student App</span>
+                    <p className="text-[11px] text-slate-500">Available instantly in Practice Quiz and Tests</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={published}
+                    onChange={(e) => setPublished(e.target.checked)}
+                    className="w-4 h-4 text-indigo-600 rounded cursor-pointer"
+                  />
                 </div>
               </div>
 
-              {/* Live Status Toggle */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+              {/* Sticky Footer Action Buttons */}
+              <div className="p-4 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50 sticky bottom-0 z-10">
                 <div>
-                  <span className="font-bold text-slate-800">Publish to Student App</span>
-                  <p className="text-[11px] text-slate-500">Available instantly in Practice Quiz and Tests</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={published}
-                  onChange={(e) => setPublished(e.target.checked)}
-                  className="w-4 h-4 text-indigo-600 rounded"
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 sticky bottom-0 bg-white">
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-2 shadow-md shadow-indigo-200 disabled:opacity-50"
-                >
-                  {isSubmitting ? (
-                    <span>Saving...</span>
+                  {editingMCQ ? (
+                    <button
+                      type="button"
+                      onClick={handleDeleteFromModal}
+                      disabled={isSubmitting}
+                      className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95 disabled:opacity-50"
+                      title="Delete this question permanently"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                      <span className="hidden sm:inline">Delete Question (हटाएं)</span>
+                      <span className="sm:hidden">Delete</span>
+                    </button>
                   ) : (
-                    <span>{editingMCQ ? 'Update Question' : 'Save Question'}</span>
+                    <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">Fill required fields</span>
                   )}
-                </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClose}
+                    className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold border border-slate-200 bg-white cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-2 shadow-md shadow-indigo-200 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <span>Saving...</span>
+                    ) : (
+                      <span>{editingMCQ ? 'Update Question' : 'Save Question (प्रश्न सहेजें)'}</span>
+                    )}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

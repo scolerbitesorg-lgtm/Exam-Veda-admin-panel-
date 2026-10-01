@@ -18,7 +18,7 @@ import {
   FolderPlus,
   BookMarked,
 } from 'lucide-react';
-import { addNote, updateNote, deleteNote, deleteAllNotes } from '../../services/dbService';
+import { addNote, updateNote, deleteNote, deleteNotesByTopic, deleteAllNotes } from '../../services/dbService';
 import type { Subject, Topic, Note } from '../../types';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 
@@ -73,9 +73,13 @@ export const NotesView: React.FC<NotesViewProps> = ({
   const [pageCount, setPageCount] = useState<number>(10);
   const [published, setPublished] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deleteOldInTopicBeforeAdd, setDeleteOldInTopicBeforeAdd] = useState(false);
 
   // Available topics based on selected subject in modal
   const modalAvailableTopics = topics.filter((t) => !selectedSubjectId || t.subjectId === selectedSubjectId);
+
+  // Count of existing notes in the currently selected topic
+  const existingNotesInSelectedTopic = notes.filter((n) => n.topicId === selectedTopicId);
 
   // Available topics for filtering
   const filterAvailableTopics = topics.filter((t) => !filterSubjectId || t.subjectId === filterSubjectId);
@@ -118,6 +122,7 @@ export const NotesView: React.FC<NotesViewProps> = ({
   const openAddModal = () => {
     setEditingNote(null);
     setErrorMessage(null);
+    setDeleteOldInTopicBeforeAdd(false);
     const subId = filterSubjectId || subjects[0]?.id || '';
     setSelectedSubjectId(subId);
     const avail = topics.filter((t) => t.subjectId === subId);
@@ -126,7 +131,7 @@ export const NotesView: React.FC<NotesViewProps> = ({
     setHindiTitle('');
     setIcon('📝');
     setType('text');
-    setContent(`# Chapter Overview & Revision Pointers (महत्वपूर्ण सारांश)\n\n## Important Concepts (मुख्य संकल्पनाएं)\n- मुख्य तथ्य और ऐतिहासिक पृष्ठभूमि\n- प्रमुख सिद्धांत एवं उनका अनुप्रयोग\n\n## Key Exam Pointers (परीक्षा दृष्टि)\n- महत्वपूर्ण तिथियां, समितियां व अनुच्छेद\n- संभावित मुख्य प्रश्न`);
+    setContent('');
     setPdfUrl('');
     setPageCount(10);
     setPublished(true);
@@ -136,6 +141,7 @@ export const NotesView: React.FC<NotesViewProps> = ({
   const openEditModal = (note: Note) => {
     setEditingNote(note);
     setErrorMessage(null);
+    setDeleteOldInTopicBeforeAdd(false);
     setSelectedSubjectId(note.subjectId);
     setSelectedTopicId(note.topicId);
     setTitle(note.title || '');
@@ -211,6 +217,11 @@ export const NotesView: React.FC<NotesViewProps> = ({
 
     setIsSubmitting(true);
     try {
+      // Purge previous notes in this topic if selected
+      if (deleteOldInTopicBeforeAdd && selectedTopicId) {
+        await deleteNotesByTopic(selectedTopicId);
+      }
+
       const parentSubject = subjects.find((s) => s.id === selectedSubjectId);
       const parentTopic = topics.find((t) => t.id === selectedTopicId);
 
@@ -245,6 +256,38 @@ export const NotesView: React.FC<NotesViewProps> = ({
     } catch (err: any) {
       console.error('Error saving note:', err);
       setErrorMessage('नोट सहेजने में त्रुटि: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteFromModal = async () => {
+    if (!editingNote) return;
+    if (!window.confirm(`क्या आप नोट "${editingNote.title}" को डिलीट करना चाहते हैं?`)) return;
+    setIsSubmitting(true);
+    try {
+      await deleteNote(editingNote.id);
+      setDeleteSuccess(`नोट "${editingNote.title}" सफलतापूर्वक हटा दिया गया।`);
+      setTimeout(() => setDeleteSuccess(null), 4000);
+      handleClose();
+    } catch (err: any) {
+      setErrorMessage('नोट डिलीट करने में त्रुटि: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleQuickPurgeTopicNotes = async () => {
+    if (!selectedTopicId) return;
+    const targetTopic = topics.find((t) => t.id === selectedTopicId);
+    if (!window.confirm(`क्या आप टॉपिक "${targetTopic?.title || 'Selected Topic'}" के सभी ${existingNotesInSelectedTopic.length} पुराने नोट्स हटाना चाहते हैं?`)) return;
+    setIsSubmitting(true);
+    try {
+      const res = await deleteNotesByTopic(selectedTopicId);
+      setDeleteSuccess(`टॉपिक के ${res.deletedCount} पुराने नोट्स हटा दिए गए।`);
+      setTimeout(() => setDeleteSuccess(null), 4000);
+    } catch (err: any) {
+      setErrorMessage('नोट्स हटाने में त्रुटि: ' + err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -634,262 +677,322 @@ export const NotesView: React.FC<NotesViewProps> = ({
 
       {/* Add / Edit Note Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-          <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 my-8 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+        <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div className="w-full max-w-lg bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 flex flex-col max-h-[92vh] sm:max-h-[90vh] my-auto overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Sticky Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white z-10 sticky top-0">
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
                 <FileText className="w-5 h-5 text-indigo-600" />
-                {editingNote ? 'Edit Study Note (नोट संपादित करें)' : 'Create New Study Note (नया नोट जोड़ें)'}
+                <span>{editingNote ? 'Edit Study Note (नोट संपादित करें)' : 'Create New Study Note (नया नोट जोड़ें)'}</span>
               </h2>
               <button
+                type="button"
                 onClick={handleClose}
-                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer"
+                title="Close modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {errorMessage && (
-              <div className="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-start gap-2">
+              <div className="mx-4 mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-start gap-2 shrink-0">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                 <span>{errorMessage}</span>
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs">
-              {/* Subject & Topic Selectors */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Subject (विषय) *</label>
-                  {subjects.length === 0 ? (
-                    <div className="text-xs text-rose-600 font-semibold p-2 rounded-lg bg-rose-50 border border-rose-200">
-                      No subjects available.
-                    </div>
-                  ) : (
-                    <select
-                      value={selectedSubjectId}
-                      onChange={(e) => {
-                        const newSubId = e.target.value;
-                        setSelectedSubjectId(newSubId);
-                        const avail = topics.filter((t) => t.subjectId === newSubId);
-                        setSelectedTopicId(avail[0]?.id || '');
-                      }}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold cursor-pointer"
-                    >
-                      {subjects.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+                {/* Subject & Topic Selectors */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Subject (विषय) *</label>
+                    {subjects.length === 0 ? (
+                      <div className="text-xs text-rose-600 font-semibold p-2 rounded-lg bg-rose-50 border border-rose-200">
+                        No subjects available.
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedSubjectId}
+                        onChange={(e) => {
+                          const newSubId = e.target.value;
+                          setSelectedSubjectId(newSubId);
+                          const avail = topics.filter((t) => t.subjectId === newSubId);
+                          setSelectedTopicId(avail[0]?.id || '');
+                        }}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold cursor-pointer bg-white"
+                      >
+                        {subjects.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Topic (अध्याय) *</label>
+                    {modalAvailableTopics.length === 0 ? (
+                      <div className="text-xs text-amber-700 font-medium p-2 rounded-lg bg-amber-50 border border-amber-200">
+                        इस Subject में Topic नहीं है!
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedTopicId}
+                        onChange={(e) => setSelectedTopicId(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold cursor-pointer bg-white"
+                      >
+                        {modalAvailableTopics.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.title}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Topic (अध्याय) *</label>
-                  {modalAvailableTopics.length === 0 ? (
-                    <div className="text-xs text-amber-700 font-medium p-2 rounded-lg bg-amber-50 border border-amber-200">
-                      इस Subject में Topic नहीं है!
+                {/* Purge / Delete Existing Notes Option */}
+                <div className="p-3 rounded-2xl bg-rose-50/80 border border-rose-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <label className="flex items-start sm:items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={deleteOldInTopicBeforeAdd}
+                      onChange={(e) => setDeleteOldInTopicBeforeAdd(e.target.checked)}
+                      className="w-4 h-4 mt-0.5 sm:mt-0 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+                    />
+                    <div>
+                      <span className="font-extrabold text-rose-900 block text-xs">
+                        पुराने नोट्स डिलीट करके नया नोट जोड़ें (Replace / Delete Old)
+                      </span>
+                      <span className="text-[11px] text-rose-700 block">
+                        {existingNotesInSelectedTopic.length > 0
+                          ? `इस टॉपिक के ${existingNotesInSelectedTopic.length} पुराने नोट्स सेव होने पर हटा दिए जाएंगे।`
+                          : 'इस टॉपिक में अभी कोई पुराना नोट नहीं है।'}
+                      </span>
                     </div>
-                  ) : (
-                    <select
-                      value={selectedTopicId}
-                      onChange={(e) => setSelectedTopicId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold cursor-pointer"
-                    >
-                      {modalAvailableTopics.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.title}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              </div>
+                  </label>
 
-              {/* Emoji Logo Picker */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1.5">Note Emoji Logo (प्रतीक चिंन्ह)</label>
-                <div className="flex flex-wrap gap-1.5 items-center p-2 rounded-xl bg-slate-50 border border-slate-200">
-                  {EMOJI_OPTIONS.map((em) => (
+                  {existingNotesInSelectedTopic.length > 0 && (
                     <button
-                      key={em}
                       type="button"
-                      onClick={() => setIcon(em)}
-                      className={`w-8 h-8 rounded-lg text-base flex items-center justify-center transition cursor-pointer ${
-                        icon === em ? 'bg-indigo-600 text-white scale-110 shadow-xs' : 'hover:bg-slate-200'
+                      onClick={handleQuickPurgeTopicNotes}
+                      disabled={isSubmitting}
+                      className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-[11px] flex items-center justify-center gap-1 transition shadow-2xs cursor-pointer active:scale-95 disabled:opacity-50 shrink-0"
+                      title="इस टॉपिक के सभी पुराने नोट्स अभी डिलीट करें"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Purge ({existingNotesInSelectedTopic.length})</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Emoji Logo Picker */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1.5">Note Emoji Logo (प्रतीक चिंन्ह)</label>
+                  <div className="flex flex-wrap gap-1.5 items-center p-2 rounded-xl bg-slate-50 border border-slate-200">
+                    {EMOJI_OPTIONS.map((em) => (
+                      <button
+                        key={em}
+                        type="button"
+                        onClick={() => setIcon(em)}
+                        className={`w-8 h-8 rounded-lg text-base flex items-center justify-center transition cursor-pointer ${
+                          icon === em ? 'bg-indigo-600 text-white scale-110 shadow-xs' : 'hover:bg-slate-200'
+                        }`}
+                      >
+                        {em}
+                      </button>
+                    ))}
+                    <input
+                      type="text"
+                      maxLength={2}
+                      value={icon}
+                      onChange={(e) => setIcon(e.target.value)}
+                      placeholder="Custom"
+                      className="w-14 text-center px-1.5 py-1 rounded-lg border border-slate-300 bg-white font-bold text-xs"
+                      title="Type custom emoji"
+                    />
+                  </div>
+                </div>
+
+                {/* Note Format Type */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Note Format Type *</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setType('text')}
+                      className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                        type === 'text'
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-2xs'
+                          : 'border-slate-300 text-slate-600 hover:bg-slate-50'
                       }`}
                     >
-                      {em}
+                      <FileText className="w-4 h-4" />
+                      <span>Formatted Text Note</span>
                     </button>
-                  ))}
-                  <input
-                    type="text"
-                    maxLength={2}
-                    value={icon}
-                    onChange={(e) => setIcon(e.target.value)}
-                    placeholder="Custom"
-                    className="w-14 text-center px-1.5 py-1 rounded-lg border border-slate-300 bg-white font-bold text-xs"
-                    title="Type custom emoji"
-                  />
-                </div>
-              </div>
-
-              {/* Note Format Type */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Note Format Type *</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setType('text')}
-                    className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
-                      type === 'text'
-                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-2xs'
-                        : 'border-slate-300 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>Formatted Text Note</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setType('pdf')}
-                    className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
-                      type === 'pdf'
-                        ? 'bg-rose-50 border-rose-500 text-rose-700 shadow-2xs'
-                        : 'border-slate-300 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    <FileDown className="w-4 h-4" />
-                    <span>PDF Document</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Title & Hindi Title */}
-              <div className="space-y-2">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Note Title (English / Hinglish) *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Indus Valley Civilization - Core Summary & Sites"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs font-semibold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Hindi Title (हिंदी शीर्षक - वैकल्पिक)</label>
-                  <input
-                    type="text"
-                    placeholder="उदा. सिंधु घाटी सभ्यता - संपूर्ण सार संग्रह एवं मुख्य स्थल"
-                    value={hindiTitle}
-                    onChange={(e) => setHindiTitle(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs font-semibold text-indigo-700"
-                  />
-                </div>
-              </div>
-
-              {/* Dynamic Content based on Type */}
-              {type === 'text' ? (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block font-bold text-slate-700">Note Content (Bilingual Hindi & English) *</label>
-                    <div className="flex items-center gap-1 text-[10px]">
-                      <button
-                        type="button"
-                        onClick={() => insertTemplate('summary')}
-                        className="px-2 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold cursor-pointer"
-                      >
-                        + Analysis
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => insertTemplate('facts')}
-                        className="px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold cursor-pointer"
-                      >
-                        + Fact Box
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setType('pdf')}
+                      className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                        type === 'pdf'
+                          ? 'bg-rose-50 border-rose-500 text-rose-700 shadow-2xs'
+                          : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <FileDown className="w-4 h-4" />
+                      <span>PDF Document</span>
+                    </button>
                   </div>
-                  <textarea
-                    rows={8}
-                    required
-                    placeholder="Type or paste comprehensive revision notes with headings, points, and summaries in Hindi or English..."
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs font-sans leading-relaxed"
-                  />
                 </div>
-              ) : (
-                <div className="space-y-3">
+
+                {/* Title & Hindi Title */}
+                <div className="space-y-2">
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block font-bold text-slate-700">
-                        PDF Public Document URL *
-                      </label>
-                      <button
-                        type="button"
-                        onClick={handleUseDemoPdf}
-                        className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold underline cursor-pointer"
-                      >
-                        Use Sample Demo PDF
-                      </button>
-                    </div>
+                    <label className="block font-bold text-slate-700 mb-1">Note Title (English / Hinglish) *</label>
                     <input
-                      type="url"
+                      type="text"
                       required
-                      placeholder="https://.../notes.pdf"
-                      value={pdfUrl}
-                      onChange={(e) => setPdfUrl(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 font-mono text-xs focus:border-rose-500"
+                      placeholder="e.g. Indus Valley Civilization - Core Summary & Sites"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs font-semibold"
                     />
                   </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Estimated Total Pages</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={pageCount}
-                      onChange={(e) => setPageCount(Math.max(1, Number(e.target.value)))}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs font-mono"
-                    />
-                  </div>
-                </div>
-              )}
 
-              {/* Publish Toggle */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-slate-800">Publish to Student App</span>
-                  <p className="text-[11px] text-slate-500">Enable students to access this note in Notes section</p>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Hindi Title (हिंदी शीर्षक - वैकल्पिक)</label>
+                    <input
+                      type="text"
+                      placeholder="उदा. सिंधु घाटी सभ्यता - संपूर्ण सार संग्रह एवं मुख्य स्थल"
+                      value={hindiTitle}
+                      onChange={(e) => setHindiTitle(e.target.value)}
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs font-semibold text-indigo-700"
+                    />
+                  </div>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={published}
-                  onChange={(e) => setPublished(e.target.checked)}
-                  className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                />
+
+                {/* Dynamic Content based on Type */}
+                {type === 'text' ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block font-bold text-slate-700">Note Content (Bilingual Hindi & English) *</label>
+                      <div className="flex items-center gap-1 text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => insertTemplate('summary')}
+                          className="px-2 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold cursor-pointer"
+                        >
+                          + Analysis
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => insertTemplate('facts')}
+                          className="px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold cursor-pointer"
+                        >
+                          + Fact Box
+                        </button>
+                      </div>
+                    </div>
+                    <textarea
+                      rows={7}
+                      required
+                      placeholder="Type or paste comprehensive revision notes with headings, points, and summaries in Hindi or English..."
+                      value={content}
+                      onChange={(e) => setContent(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 text-xs font-sans leading-relaxed"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block font-bold text-slate-700">
+                          PDF Public Document URL *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleUseDemoPdf}
+                          className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold underline cursor-pointer"
+                        >
+                          Use Sample Demo PDF
+                        </button>
+                      </div>
+                      <input
+                        type="url"
+                        required
+                        placeholder="https://.../notes.pdf"
+                        value={pdfUrl}
+                        onChange={(e) => setPdfUrl(e.target.value)}
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 font-mono text-xs focus:border-rose-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Estimated Total Pages</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={pageCount}
+                        onChange={(e) => setPageCount(Math.max(1, Number(e.target.value)))}
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Publish Toggle */}
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-slate-800">Publish to Student App</span>
+                    <p className="text-[11px] text-slate-500">Enable students to access this note in Notes section</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={published}
+                    onChange={(e) => setPublished(e.target.checked)}
+                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                  />
+                </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 font-bold hover:bg-slate-50 transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition shadow-md shadow-indigo-200 disabled:opacity-50 cursor-pointer"
-                >
-                  {isSubmitting ? 'Saving...' : editingNote ? 'Update Note' : 'Save Note (नोट सहेजें)'}
-                </button>
+              {/* Sticky Footer Action Buttons */}
+              <div className="p-4 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50 sticky bottom-0 z-10">
+                <div>
+                  {editingNote ? (
+                    <button
+                      type="button"
+                      onClick={handleDeleteFromModal}
+                      disabled={isSubmitting}
+                      className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95 disabled:opacity-50"
+                      title="Delete this note permanently"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                      <span className="hidden sm:inline">Delete Note (हटाएं)</span>
+                      <span className="sm:hidden">Delete</span>
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">Fill required fields</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClose}
+                    className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 font-bold hover:bg-slate-100 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition shadow-md shadow-indigo-200 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSubmitting ? 'Saving...' : editingNote ? 'Update Note' : 'Save Note (नोट सहेजें)'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

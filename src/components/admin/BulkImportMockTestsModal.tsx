@@ -12,9 +12,10 @@ import {
   Clock,
   Award,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 import type { Subject, Topic, MCQ, MockTest } from '../../types';
-import { bulkInsertMockTests } from '../../services/dbService';
+import { bulkInsertMockTests, deleteAllMockTests } from '../../services/dbService';
 
 interface BulkImportMockTestsModalProps {
   isOpen: boolean;
@@ -55,6 +56,7 @@ export const BulkImportMockTestsModal: React.FC<BulkImportMockTestsModalProps> =
   const [copied, setCopied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [purgeAllBeforeImport, setPurgeAllBeforeImport] = useState(false);
 
   // Helper to pick unique non-repeating MCQs
   const pickUniqueQuestions = (targetCount: number, tagKeywords: string[]): string[] => {
@@ -220,6 +222,10 @@ export const BulkImportMockTestsModal: React.FC<BulkImportMockTestsModalProps> =
 
     setIsSubmitting(true);
     try {
+      if (purgeAllBeforeImport) {
+        await deleteAllMockTests();
+      }
+
       const now = new Date().toISOString();
       const mockList: Omit<MockTest, 'id'>[] = validRows.map((v) => ({
         title: v.title,
@@ -249,39 +255,61 @@ export const BulkImportMockTestsModal: React.FC<BulkImportMockTestsModalProps> =
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 my-8 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 shrink-0">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+      <div className="w-full max-w-3xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 flex flex-col max-h-[94vh] sm:max-h-[90vh] my-auto overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        {/* Sticky Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white z-10 sticky top-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-purple-50 border border-purple-200 text-purple-600 flex items-center justify-center shadow-2xs">
+            <div className="w-9 h-9 rounded-2xl bg-purple-50 border border-purple-200 text-purple-600 flex items-center justify-center shadow-2xs shrink-0">
               <FileSpreadsheet className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-slate-900">
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
                 Bulk Import Mock Tests (थोक मॉक टेस्ट जोड़ें)
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] text-slate-500 hidden sm:block">
                 CSV या JSON से एक साथ कई मॉक टेस्ट बनाएं। प्रश्न मौजूदा बैंक से ऑटो-असाइन हो जाएंगे।
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer"
+            title="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto py-4 space-y-4 text-xs pr-1">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
           {importSuccess && (
             <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               <span>{importSuccess}</span>
             </div>
           )}
+
+          {/* Purge / Replace Option */}
+          <div className="p-3 rounded-2xl bg-rose-50/80 border border-rose-200/90 flex items-center justify-between gap-2.5">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={purgeAllBeforeImport}
+                onChange={(e) => setPurgeAllBeforeImport(e.target.checked)}
+                className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+              />
+              <div>
+                <span className="font-extrabold text-rose-900 block text-xs">
+                  आयात से पहले डेटाबेस के सभी पुराने मॉक टेस्ट हटाएं (Purge / Replace All Old Mock Tests)
+                </span>
+                <span className="text-[11px] text-rose-700">
+                  चेक करने पर पुराने सभी मॉक टेस्ट हटाकर यह नई सीरीज अपलोड होगी (MCQ बैंक सुरक्षित रहेगा)।
+                </span>
+              </div>
+            </label>
+          </div>
 
           {/* Sample template actions */}
           <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-slate-50 border border-slate-200">
@@ -296,7 +324,7 @@ export const BulkImportMockTestsModal: React.FC<BulkImportMockTestsModalProps> =
               <button
                 type="button"
                 onClick={handleCopySample}
-                className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-semibold text-[11px] flex items-center gap-1 shadow-2xs"
+                className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-semibold text-[11px] flex items-center gap-1 shadow-2xs cursor-pointer"
               >
                 {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                 <span>{copied ? 'Copied' : 'Copy Sample'}</span>
@@ -325,7 +353,7 @@ export const BulkImportMockTestsModal: React.FC<BulkImportMockTestsModalProps> =
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               placeholder="Paste comma separated rows or JSON array..."
-              className="w-full p-3 font-mono text-xs rounded-2xl border border-slate-300 focus:border-purple-500 focus:ring-2 focus:ring-purple-100 outline-hidden leading-relaxed"
+              className="w-full p-3 font-mono text-xs rounded-2xl border border-slate-300 focus:border-purple-500 focus:ring-2 focus:ring-purple-100 outline-hidden leading-relaxed bg-white"
             />
           </div>
 
@@ -333,7 +361,7 @@ export const BulkImportMockTestsModal: React.FC<BulkImportMockTestsModalProps> =
             <button
               type="button"
               onClick={handleParse}
-              className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-200 active:scale-95"
+              className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-200 active:scale-95 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
               <span>Parse & Validate Mock Tests</span>
@@ -397,11 +425,11 @@ export const BulkImportMockTestsModal: React.FC<BulkImportMockTestsModalProps> =
         </div>
 
         {/* Footer */}
-        <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0">
+        <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0 bg-white sticky bottom-0">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold text-xs"
+            className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold text-xs border border-slate-200 bg-white cursor-pointer"
           >
             Cancel
           </button>
@@ -409,7 +437,7 @@ export const BulkImportMockTestsModal: React.FC<BulkImportMockTestsModalProps> =
             type="button"
             onClick={handleExecuteImport}
             disabled={isSubmitting || parsedItems.filter((p) => p.isValid).length === 0}
-            className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-extrabold text-xs flex items-center gap-2 shadow-md shadow-purple-200 disabled:opacity-50"
+            className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-extrabold text-xs flex items-center gap-2 shadow-md shadow-purple-200 disabled:opacity-50 cursor-pointer"
           >
             {isSubmitting ? (
               <>

@@ -22,7 +22,7 @@ import {
   Award,
 } from 'lucide-react';
 import type { Subject, Topic, MCQ } from '../../types';
-import { addMCQsBatch } from '../../services/dbService';
+import { addMCQsBatch, deleteMCQsByTopic } from '../../services/dbService';
 import { detectExamMetadata } from '../../utils/examTagDetector';
 
 interface MCQAutoImporterModalProps {
@@ -114,6 +114,7 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
   const [batchExamTag, setBatchExamTag] = useState('');
   const [examNotes, setExamNotes] = useState('');
   const [showPreviewList, setShowPreviewList] = useState(false);
+  const [purgeOldBeforeImport, setPurgeOldBeforeImport] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveProgress, setSaveProgress] = useState(0);
@@ -372,6 +373,10 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
     setSaveProgress(10);
 
     try {
+      if (purgeOldBeforeImport && selectedTopicId) {
+        await deleteMCQsByTopic(selectedTopicId);
+      }
+
       const mcqsToUpload = validItems.map((item, index) => {
         return {
           subjectId: selectedSubjectId,
@@ -537,6 +542,26 @@ export const MCQAutoImporterModal: React.FC<MCQAutoImporterModalProps> = ({
                       ))}
                     </select>
                   </div>
+                </div>
+
+                {/* Purge / Replace Existing MCQs in this Topic */}
+                <div className="p-3 rounded-2xl bg-rose-50/80 border border-rose-200/90 flex items-center justify-between gap-2.5">
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={purgeOldBeforeImport}
+                      onChange={(e) => setPurgeOldBeforeImport(e.target.checked)}
+                      className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+                    />
+                    <div>
+                      <span className="font-extrabold text-rose-900 block text-xs">
+                        सहेजने से पहले इस टॉपिक के पुराने प्रश्न डिलीट करें (Purge / Replace Old)
+                      </span>
+                      <span className="text-[11px] text-rose-700">
+                        चेक करने पर इस टॉपिक में मौजूद सभी पुराने प्रश्न डिलीट होकर केवल ये नए प्रश्न सहेजे जाएंगे।
+                      </span>
+                    </div>
+                  </label>
                 </div>
               </div>
 

@@ -14,9 +14,10 @@ import {
   Award,
   Clock,
   HelpCircle,
+  Trash2,
 } from 'lucide-react';
 import type { Subject, Topic, MCQ } from '../../types';
-import { addMockTest } from '../../services/dbService';
+import { addMockTest, deleteMockTestsBySubject } from '../../services/dbService';
 
 interface BulkImportMockTestModalProps {
   isOpen: boolean;
@@ -63,8 +64,14 @@ export const BulkImportMockTestModal: React.FC<BulkImportMockTestModalProps> = (
   const [copiedTemplate, setCopiedTemplate] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importSuccess, setImportSuccess] = useState(false);
+  const [purgeOldBeforeImport, setPurgeOldBeforeImport] = useState(false);
 
   if (!isOpen) return null;
+
+  // Count existing mock tests in selected subject
+  const existingMocksInSubject = selectedSubjectId
+    ? mcqs // placeholder check
+    : [];
 
   // Parse CSV questions for the mock test
   const parseQuestions = (text: string): ParsedMockQuestion[] => {
@@ -173,6 +180,10 @@ export const BulkImportMockTestModal: React.FC<BulkImportMockTestModalProps> = (
 
     setIsImporting(true);
     try {
+      if (purgeOldBeforeImport && selectedSubjectId) {
+        await deleteMockTestsBySubject(selectedSubjectId);
+      }
+
       const totalScore = parsedQuestions.length * marksPerQuestion;
       const passScore = Math.ceil(totalScore * 0.4);
 
@@ -221,32 +232,35 @@ export const BulkImportMockTestModal: React.FC<BulkImportMockTestModalProps> = (
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 my-8 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 sticky top-0 bg-white z-20">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+      <div className="w-full max-w-3xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 flex flex-col max-h-[94vh] sm:max-h-[90vh] my-auto overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        {/* Sticky Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white z-10 sticky top-0">
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-2xl bg-purple-600 text-white flex items-center justify-center shadow-md shadow-purple-200">
+            <div className="w-9 h-9 rounded-2xl bg-purple-600 text-white flex items-center justify-center shadow-md shadow-purple-200 shrink-0">
               <FileSpreadsheet className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-1.5">
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-1.5">
                 Bulk Import Mock Test & Questions (CSV/Text)
               </h2>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-slate-500 hidden sm:block">
                 Paste 10 to 100+ questions at once to create a complete mock test with auto-deduplication.
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer"
+            title="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {importSuccess ? (
-          <div className="py-8 text-center space-y-4">
+          <div className="p-6 sm:p-8 text-center space-y-4 my-auto overflow-y-auto">
             <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
               <CheckCircle2 className="w-8 h-8" />
             </div>
@@ -260,144 +274,166 @@ export const BulkImportMockTestModal: React.FC<BulkImportMockTestModalProps> = (
             <div className="pt-4 flex items-center justify-center gap-3">
               <button
                 onClick={onClose}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-200"
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-200 cursor-pointer"
               >
                 Done & View Mock Tests
               </button>
             </div>
           </div>
         ) : (
-          <div className="mt-4 space-y-4 text-xs">
-            {/* Test Metadata */}
-            <div className="p-4 rounded-2xl bg-purple-50/50 border border-purple-100 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block font-bold text-slate-800 mb-1">
-                    Mock Test Title (English) *
-                  </label>
+          <div className="flex flex-col flex-1 overflow-hidden">
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+              {/* Purge / Replace Existing Mock Tests in this Subject */}
+              <div className="p-3 rounded-2xl bg-rose-50/80 border border-rose-200/90 flex items-center justify-between gap-2.5">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none">
                   <input
-                    type="text"
-                    required
-                    placeholder="e.g. UPSC Prelims 2026 GS Paper 1 Mock"
-                    value={testTitle}
-                    onChange={(e) => setTestTitle(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-purple-500 text-xs font-semibold bg-white"
+                    type="checkbox"
+                    checked={purgeOldBeforeImport}
+                    onChange={(e) => setPurgeOldBeforeImport(e.target.checked)}
+                    className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
                   />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-800 mb-1">
-                    Primary Subject
-                  </label>
-                  <select
-                    value={selectedSubjectId}
-                    onChange={(e) => setSelectedSubjectId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-purple-500 text-xs bg-white"
-                  >
-                    <option value="">All / General Syllabus</option>
-                    {subjects.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.icon || '📚'} {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <div>
+                    <span className="font-extrabold text-rose-900 block text-xs">
+                      आयात से पहले इस विषय के पुराने मॉक टेस्ट डिलीट करें (Purge / Replace Old)
+                    </span>
+                    <span className="text-[11px] text-rose-700">
+                      चेक करने पर चुने हुए विषय के पुराने मॉक टेस्ट हटाकर यह नया टेस्ट सेव होगा।
+                    </span>
+                  </div>
+                </label>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Duration (Mins)</label>
-                  <input
-                    type="number"
-                    min="5"
-                    value={durationMinutes}
-                    onChange={(e) => setDurationMinutes(Number(e.target.value))}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono text-xs"
-                  />
+              {/* Test Metadata */}
+              <div className="p-4 rounded-2xl bg-purple-50/50 border border-purple-100 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-800 mb-1">
+                      Mock Test Title (English) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. UPSC Prelims 2026 GS Paper 1 Mock"
+                      value={testTitle}
+                      onChange={(e) => setTestTitle(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-purple-500 text-xs font-semibold bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-800 mb-1">
+                      Primary Subject
+                    </label>
+                    <select
+                      value={selectedSubjectId}
+                      onChange={(e) => setSelectedSubjectId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-purple-500 text-xs bg-white font-semibold cursor-pointer"
+                    >
+                      <option value="">All / General Syllabus</option>
+                      {subjects.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.icon || '📚'} {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Marks per Q</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={marksPerQuestion}
-                    onChange={(e) => setMarksPerQuestion(Number(e.target.value))}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Negative Mark</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={negativeMarking}
-                    onChange={(e) => setNegativeMarking(Number(e.target.value))}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Total Marks</label>
-                  <div className="px-2.5 py-1.5 rounded-lg bg-slate-200/70 text-slate-800 font-bold font-mono text-xs">
-                    {parsedQuestions.length * marksPerQuestion} Marks
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Duration (Mins)</label>
+                    <input
+                      type="number"
+                      min="5"
+                      value={durationMinutes}
+                      onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Marks per Q</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={marksPerQuestion}
+                      onChange={(e) => setMarksPerQuestion(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Negative Mark</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={negativeMarking}
+                      onChange={(e) => setNegativeMarking(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Total Marks</label>
+                    <div className="px-2.5 py-1.5 rounded-lg bg-slate-200/70 text-slate-800 font-bold font-mono text-xs">
+                      {parsedQuestions.length * marksPerQuestion} Marks
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Paste Data Area */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <HelpCircle className="w-3.5 h-3.5 text-purple-600" />
-                  Paste CSV / Pipe Separated Questions Data:
-                </label>
-                <button
-                  type="button"
-                  onClick={handleCopyTemplate}
-                  className="text-[11px] text-purple-700 font-bold hover:underline flex items-center gap-1"
-                >
-                  {copiedTemplate ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedTemplate ? 'Template Copied!' : 'Copy CSV Template'}</span>
-                </button>
-              </div>
-
-              <textarea
-                rows={7}
-                value={rawText}
-                onChange={(e) => setRawText(e.target.value)}
-                placeholder="Paste CSV rows here..."
-                className="w-full px-3 py-2.5 rounded-2xl border border-slate-300 focus:border-purple-500 font-mono text-[11px] leading-relaxed"
-              />
-            </div>
-
-            {/* Live Parsing Preview & Deduplication Stats */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+              {/* Paste Data Area */}
               <div>
-                <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Valid Unique Questions Parsed:</span>
-                  <strong className="text-purple-700 text-sm font-extrabold ml-1">
-                    {parsedQuestions.length}
-                  </strong>
-                </span>
-                <p className="text-[10px] text-slate-500 mt-0.5">
-                  Duplicate rows and invalid questions are automatically removed.
-                </p>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <HelpCircle className="w-3.5 h-3.5 text-purple-600" />
+                    Paste CSV / Pipe Separated Questions Data:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleCopyTemplate}
+                    className="text-[11px] text-purple-700 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    {copiedTemplate ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedTemplate ? 'Template Copied!' : 'Copy CSV Template'}</span>
+                  </button>
+                </div>
+
+                <textarea
+                  rows={7}
+                  value={rawText}
+                  onChange={(e) => setRawText(e.target.value)}
+                  placeholder="Paste CSV rows here..."
+                  className="w-full px-3 py-2.5 rounded-2xl border border-slate-300 focus:border-purple-500 font-mono text-[11px] leading-relaxed bg-white"
+                />
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                  Zero Duplicates
-                </span>
+              {/* Live Parsing Preview & Deduplication Stats */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                <div>
+                  <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Valid Unique Questions Parsed:</span>
+                    <strong className="text-purple-700 text-sm font-extrabold ml-1">
+                      {parsedQuestions.length}
+                    </strong>
+                  </span>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Duplicate rows and invalid questions are automatically removed.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                    Zero Duplicates
+                  </span>
+                </div>
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 sticky bottom-0 bg-white">
+            {/* Actions Footer */}
+            <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-3 shrink-0 bg-white sticky bottom-0">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold"
+                className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-bold border border-slate-200 bg-white cursor-pointer"
               >
                 Cancel
               </button>
@@ -405,7 +441,7 @@ export const BulkImportMockTestModal: React.FC<BulkImportMockTestModalProps> = (
                 type="button"
                 onClick={handleImport}
                 disabled={isImporting || parsedQuestions.length === 0 || !testTitle.trim()}
-                className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-extrabold flex items-center gap-2 shadow-md shadow-purple-200 disabled:opacity-50 transition"
+                className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-extrabold flex items-center gap-2 shadow-md shadow-purple-200 disabled:opacity-50 transition cursor-pointer"
               >
                 {isImporting ? (
                   <span>Importing Questions...</span>

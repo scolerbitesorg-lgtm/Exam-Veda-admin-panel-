@@ -15,8 +15,9 @@ import {
   Calendar,
 } from 'lucide-react';
 import type { Subject, Topic } from '../../types';
-import { addMCQsBatch } from '../../services/dbService';
+import { addMCQsBatch, deleteMCQsByTopic } from '../../services/dbService';
 import { detectExamMetadata } from '../../utils/examTagDetector';
+import { Trash2 } from 'lucide-react';
 
 interface BulkImportMCQModalProps {
   isOpen: boolean;
@@ -89,6 +90,7 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
   const [copiedTemplate, setCopiedTemplate] = useState(false);
   const [parsedItems, setParsedItems] = useState<ParsedMCQItem[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const [purgeOldBeforeImport, setPurgeOldBeforeImport] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Parse CSV / Pipe / JSON separated text
@@ -379,6 +381,10 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
     setImportProgress({ current: 0, total: validItems.length });
 
     try {
+      if (purgeOldBeforeImport && selectedTopicId) {
+        await deleteMCQsByTopic(selectedTopicId);
+      }
+
       const mcqsToUpload = validItems.map((item, idx) => ({
         subjectId: selectedSubjectId,
         topicId: selectedTopicId,
@@ -417,32 +423,34 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
   const invalidCount = parsedItems.length - validCount;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-slate-100 p-6 my-8 flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
-        {/* Modal Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 shrink-0">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+      <div className="w-full max-w-4xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 flex flex-col max-h-[92vh] sm:max-h-[90vh] my-auto overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        {/* Sticky Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white z-10 sticky top-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
               <FileSpreadsheet className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-slate-900">
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
                 Bulk Import MCQs (प्रश्नोत्तरी थोक आयात)
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] sm:text-xs text-slate-500 hidden sm:block">
                 Import dozens of multiple-choice questions at once using CSV, Excel copy-paste, or pipe-delimited text.
               </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer"
+            title="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-4 space-y-4 text-xs">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
           {/* Target Subject & Topic Selection */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-200">
             <div>
@@ -488,6 +496,26 @@ export const BulkImportMCQModal: React.FC<BulkImportMCQModalProps> = ({
                 )}
               </select>
             </div>
+          </div>
+
+          {/* Purge / Replace Existing MCQs in this Topic */}
+          <div className="p-3 rounded-2xl bg-rose-50/80 border border-rose-200/90 flex items-center justify-between gap-2.5">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={purgeOldBeforeImport}
+                onChange={(e) => setPurgeOldBeforeImport(e.target.checked)}
+                className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+              />
+              <div>
+                <span className="font-extrabold text-rose-900 block text-xs">
+                  आयात से पहले इस टॉपिक के पुराने प्रश्न डिलीट करें (Purge / Delete existing MCQs in Topic)
+                </span>
+                <span className="text-[11px] text-rose-700">
+                  चेक करने पर इस चुने हुए टॉपिक में मौजूद सभी पुराने प्रश्न डिलीट हो जाएंगे और केवल नए प्रश्न रहेंगे।
+                </span>
+              </div>
+            </label>
           </div>
 
           {/* Dedicated Batch Exam Date & Tagging Field */}
